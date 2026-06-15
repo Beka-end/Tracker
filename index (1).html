@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Учёт прихода</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
+<style>
+  :root{
+    --ink:#0F1217; --surface:#181C24; --surface2:#1F2530;
+    --line:rgba(255,255,255,.08); --line-strong:rgba(255,255,255,.14);
+    --text:#E9ECF2; --muted:#8B93A3;
+    --brass:#E3B341; --green:#4BD0A0; --red:#F0716A; --blue:#6AA8F0;
+    --radius:16px;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--ink); color:var(--text); font-family:var(--sans);
+    -webkit-font-smoothing:antialiased; line-height:1.45; display:flex; justify-content:center;}
+  .app{width:100%; max-width:480px; min-height:100dvh; background:var(--ink);
+    display:flex; flex-direction:column; position:relative;
+    border-left:1px solid var(--line); border-right:1px solid var(--line);}
+
+  /* ---- Login ---- */
+  .login{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; background:var(--ink); z-index:50}
+  .login-card{width:100%; max-width:360px}
+  .login .logo{display:flex; align-items:center; gap:10px; margin-bottom:24px}
+  .login .logo .dot{width:36px;height:36px;border-radius:10px;background:var(--brass);display:grid;place-items:center;color:#13161C;font-weight:800;font-size:18px}
+  .login .logo .t b{display:block;font-size:16px} .login .logo .t span{font-size:12px;color:var(--muted)}
+  .login h1{font-size:20px; margin:0 0 4px} .login .lead{color:var(--muted); font-size:13px; margin:0 0 22px}
+  .login-hint{margin-top:18px; font-size:12px; color:var(--muted); background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px}
+  .login-hint code{color:var(--brass); font-family:var(--mono)}
+  .err{color:var(--red); font-size:13px; min-height:18px; margin-top:10px}
+
+  header{padding:16px 18px 14px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; gap:12px;}
+  .who-box{display:flex; flex-direction:column; gap:2px; min-width:0}
+  .who-box .name{font-weight:650; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .who-box .role{font-size:11px; color:var(--muted); display:flex; align-items:center; gap:6px}
+  .role .badge{font-size:10px; padding:1px 7px; border-radius:20px; letter-spacing:.3px; text-transform:uppercase}
+  .badge.admin{background:rgba(227,179,65,.16); color:var(--brass)}
+  .badge.emp{background:rgba(106,168,240,.16); color:var(--blue)}
+  .logout{border:0;background:var(--surface2);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-strong);
+    padding:8px 12px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer; flex:none}
+  .clock{font-family:var(--mono); font-size:14px; font-variant-numeric:tabular-nums; color:var(--brass)}
+
+  nav{display:flex; padding:10px 12px; gap:6px; border-bottom:1px solid var(--line)}
+  nav button{flex:1; border:0; cursor:pointer; padding:10px 6px; border-radius:11px;
+    background:transparent; color:var(--muted); font-family:var(--sans);
+    font-size:12.5px; font-weight:600; transition:.15s;}
+  nav button[aria-selected="true"]{background:var(--surface2); color:var(--text); box-shadow:inset 0 0 0 1px var(--line-strong)}
+  nav button:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
+
+  main{flex:1; padding:20px; overflow:auto}
+  .view{display:none; animation:fade .2s ease}
+  .view.active{display:block}
+  @keyframes fade{from{opacity:0; transform:translateY(4px)}to{opacity:1; transform:none}}
+
+  .station{display:flex; flex-direction:column; align-items:center; text-align:center}
+  .date-big{font-family:var(--mono); font-size:13px; letter-spacing:2px; text-transform:uppercase; color:var(--muted)}
+  .date-day{font-family:var(--mono); font-size:30px; font-weight:600; letter-spacing:1px; margin:4px 0 2px; font-variant-numeric:tabular-nums}
+  .station-hint{font-size:13px; color:var(--muted); max-width:300px; margin:2px auto 18px}
+  .qr-frame{background:#fff; padding:18px; border-radius:18px; position:relative;
+    box-shadow:0 0 0 1px var(--line-strong), 0 18px 40px -18px rgba(227,179,65,.35);}
+  .qr-frame::before,.qr-frame::after{content:""; position:absolute; width:18px; height:18px}
+  .qr-frame::before{top:-7px; left:-7px; border-top:3px solid var(--brass); border-left:3px solid var(--brass); border-radius:4px 0 0 0}
+  .qr-frame::after{bottom:-7px; right:-7px; border-bottom:3px solid var(--brass); border-right:3px solid var(--brass); border-radius:0 0 4px 0}
+  #qr{display:flex; justify-content:center}
+  #qr img,#qr canvas{display:block; border-radius:4px}
+  .code-pill{margin-top:18px; font-family:var(--mono); font-size:13px; letter-spacing:1px; color:var(--muted)}
+  .code-pill b{color:var(--brass); font-weight:600}
+
+  .field{margin-bottom:14px}
+  label{display:block; font-size:12px; color:var(--muted); margin-bottom:7px; letter-spacing:.3px}
+  input[type=text],input[type=password],input[type=date],select{
+    width:100%; padding:13px 14px; border-radius:12px; border:1px solid var(--line-strong);
+    background:var(--surface); color:var(--text); font-size:15px; font-family:var(--sans);}
+  input:focus,select:focus{outline:2px solid var(--brass); outline-offset:1px; border-color:transparent}
+  .btn{width:100%; border:0; cursor:pointer; padding:14px; border-radius:13px; font-size:15px;
+    font-weight:650; font-family:var(--sans); transition:.15s; color:#13161C; background:var(--brass);}
+  .btn:hover{filter:brightness(1.05)} .btn:active{transform:translateY(1px)} .btn:disabled{opacity:.5; cursor:not-allowed}
+  .btn.secondary{background:var(--surface2); color:var(--text); box-shadow:inset 0 0 0 1px var(--line-strong)}
+  .btn.ghost{background:transparent; color:var(--muted); box-shadow:inset 0 0 0 1px var(--line)}
+  .btn.sm{padding:9px 12px; font-size:13px; width:auto}
+  .btn:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
+  .row{display:flex; gap:10px} .row .btn{flex:1}
+
+  #reader{margin-top:6px; border-radius:14px; overflow:hidden; border:1px solid var(--line-strong)}
+  #reader:empty{display:none}
+  #reader:not(:empty){min-height:260px; background:#000}
+  #reader video{width:100% !important; height:auto !important; display:block}
+  .scan-status{font-size:13px; color:var(--muted); text-align:center; margin-top:12px; min-height:18px}
+
+  .result{margin-top:18px; padding:20px; border-radius:16px; background:var(--surface);
+    border:1px solid var(--line); text-align:center; display:none;}
+  .result.show{display:block; animation:fade .25s ease}
+  .result .mark{width:54px; height:54px; border-radius:50%; margin:0 auto 12px; display:grid; place-items:center; font-size:28px;}
+  .result.ok .mark{background:rgba(75,208,160,.15); color:var(--green)}
+  .result.warn .mark{background:rgba(227,179,65,.15); color:var(--brass)}
+  .result.err .mark{background:rgba(240,113,106,.15); color:var(--red)}
+  .result .who{font-size:18px; font-weight:650; margin-bottom:4px}
+  .result .meta{font-family:var(--mono); font-size:14px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .result .note{font-size:13px; color:var(--muted); margin-top:8px}
+
+  .section-title{font-size:13px; color:var(--muted); margin:0 0 12px; letter-spacing:.3px; text-transform:uppercase}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:18px}
+  .grid2{display:flex; gap:10px} .grid2 > *{flex:1}
+
+  .list{display:flex; flex-direction:column; gap:8px}
+  .rec{display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:13px; background:var(--surface); border:1px solid var(--line);}
+  .rec .avatar{width:34px; height:34px; border-radius:9px; background:var(--surface2); display:grid; place-items:center; font-weight:650; font-size:13px; color:var(--brass); flex:none}
+  .rec .info{flex:1; min-width:0}
+  .rec .info .n{font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .rec .info .d{font-size:12px; color:var(--muted); font-family:var(--mono)}
+  .rec .info .d2{font-size:11px; color:#5b6473; font-family:var(--mono); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .rec .time{font-family:var(--mono); font-size:15px; color:var(--green); font-variant-numeric:tabular-nums; flex:none}
+  .rec .acts{display:flex; gap:6px; flex:none}
+  .iconbtn{width:30px;height:30px;border-radius:8px;border:0;cursor:pointer;background:var(--surface2);color:var(--muted);font-size:14px;box-shadow:inset 0 0 0 1px var(--line)}
+  .iconbtn:hover{color:var(--text)} .iconbtn.danger:hover{color:var(--red)}
+  .empty{text-align:center; color:var(--muted); padding:42px 12px; font-size:14px}
+  .empty .big{font-size:30px; margin-bottom:10px; opacity:.5}
+  .count{font-family:var(--mono); font-size:12px; color:var(--muted)}
+  .head-row{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px}
+  .toolbar{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap}
+  .toolbar .btn{flex:1; padding:12px; min-width:120px}
+  .note-line{font-size:12px;color:var(--muted);margin-top:10px}
+  .badge.late{background:rgba(240,113,106,.16); color:var(--red); font-size:10px; padding:1px 7px; border-radius:20px; text-transform:none}
+  .jtimes{font-family:var(--mono); font-size:12px; color:var(--muted); text-align:right; flex:none; line-height:1.5}
+  .jtimes span{color:#5b6473; display:inline-block; width:44px; text-align:left}
+  .jtimes .jw{color:var(--green); font-size:13px}
+  .ci-status{font-size:13px; color:var(--muted); margin-top:8px; line-height:1.5}
+  .ci-status.done{color:var(--green)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div class="login" id="login">
+  <div class="login-card">
+    <div class="logo"><div class="dot">✓</div><div class="t"><b>Учёт прихода</b><span>Вход в систему</span></div></div>
+    <h1>Вход</h1>
+    <p class="lead">Введите ИИН и пароль.</p>
+    <div class="field"><label for="loginIin">ИИН</label>
+      <input type="text" id="loginIin" inputmode="numeric" maxlength="12" placeholder="12 цифр" autocomplete="username" /></div>
+    <div class="field"><label for="loginPass">Пароль</label>
+      <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password" /></div>
+    <button class="btn" id="loginBtn">Войти</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="appShell" style="display:none">
+  <header>
+    <div class="who-box"><span class="name" id="hdrName">—</span><span class="role" id="hdrRole"></span></div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <span class="clock" id="liveClock">--:--:--</span>
+      <button class="logout" id="logoutBtn">Выйти</button>
+    </div>
+  </header>
+
+  <nav role="tablist" id="nav">
+    <button role="tab" data-view="station" data-role="admin" aria-selected="false">Станция</button>
+    <button role="tab" data-view="employees" data-role="admin" aria-selected="false">Сотрудники</button>
+    <button role="tab" data-view="journal" data-role="admin" aria-selected="false">Журнал</button>
+    <button role="tab" data-view="checkin" data-role="employee" aria-selected="false">Отметиться</button>
+  </nav>
+
+  <main>
+    <section class="view" id="view-station">
+      <div class="station">
+        <div class="date-big" id="stationMonth">—</div>
+        <div class="date-day" id="stationDay">—</div>
+        <p class="station-hint">Покажите экран на входе. Сотрудник сканирует код при приходе. Код обновляется каждую минуту.</p>
+        <div class="qr-frame"><div id="qr"></div></div>
+        <div class="code-pill">Код <b id="codeText">—</b> · <span id="slotTime">--:--</span></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-employees">
+      <p class="section-title">Параметры смены</p>
+      <div class="card">
+        <div class="grid2" style="align-items:flex-end">
+          <div class="field" style="margin:0"><label for="shiftStart">Начало смены</label><input type="time" id="shiftStart" value="09:00" /></div>
+          <div class="field" style="margin:0"><label for="tzInput">Часовой пояс</label><input type="text" id="tzInput" placeholder="Asia/Almaty" /></div>
+          <button class="btn sm" id="shiftSaveBtn" style="height:48px">Сохранить</button>
+        </div>
+      </div>
+      <p class="section-title">Добавить / изменить сотрудника</p>
+      <div class="card">
+        <div class="field"><label for="empIin">ИИН (12 цифр)</label><input type="text" id="empIin" inputmode="numeric" maxlength="12" placeholder="000000000000" /></div>
+        <div class="field"><label for="empFio">Фамилия Имя Отчество</label><input type="text" id="empFio" placeholder="Иванов Иван Иванович" /></div>
+        <div class="grid2">
+          <div class="field"><label for="empPass">Пароль</label><input type="text" id="empPass" placeholder="при изменении пусто = без смены" /></div>
+          <div class="field"><label for="empRole">Роль</label><select id="empRole"><option value="employee">Сотрудник</option><option value="admin">Администратор</option></select></div>
+        </div>
+        <button class="btn" id="empSaveBtn">Сохранить сотрудника</button>
+        <div class="err" id="empErr"></div>
+      </div>
+      <div class="head-row"><p class="section-title" style="margin:0">Список сотрудников</p><span class="count" id="empCount"></span></div>
+      <div class="list" id="empList"></div>
+    </section>
+
+    <section class="view" id="view-journal">
+      <p class="section-title">Отчёт за период</p>
+      <div class="card">
+        <div class="grid2">
+          <div class="field"><label for="fromDate">С</label><input type="date" id="fromDate" /></div>
+          <div class="field"><label for="toDate">По</label><input type="date" id="toDate" /></div>
+        </div>
+        <div class="field" style="margin:0"><label for="search">Поиск по ФИО или ИИН</label><input type="text" id="search" placeholder="например, Иванов" /></div>
+      </div>
+      <div class="head-row"><p class="section-title" style="margin:0">Отметки</p><span class="count" id="journalCount"></span></div>
+      <div class="list" id="journalList"></div>
+      <div class="toolbar">
+        <button class="btn" id="pdfBtn">Скачать PDF</button>
+        <button class="btn secondary" id="csvBtn">Скачать CSV</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-checkin">
+      <div class="card" style="margin-bottom:14px">
+        <div style="font-size:13px;color:var(--muted)">Вы вошли как</div>
+        <div id="ciWho" style="font-size:16px;font-weight:650;margin-top:2px">—</div>
+        <div id="ciStatus" class="ci-status"></div>
+        <div id="ciDevice" class="ci-status" style="font-family:var(--mono);font-size:11px;color:#5b6473"></div>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <button class="btn" id="scanBtn">Сканировать QR</button>
+        <button class="btn secondary" id="stopBtn" style="display:none">Остановить</button>
+      </div>
+      <div id="reader"></div>
+      <div class="scan-status" id="scanStatus"></div>
+      <div class="result" id="result">
+        <div class="mark" id="resultMark">✓</div>
+        <div class="who" id="resultWho"></div>
+        <div class="meta" id="resultMeta"></div>
+        <div class="note" id="resultNote"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
