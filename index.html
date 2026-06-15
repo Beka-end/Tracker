@@ -92,6 +92,7 @@
 
   #reader{margin-top:6px; border-radius:14px; overflow:hidden; border:1px solid var(--line-strong)}
   #reader:empty{display:none}
+  #reader video{width:100% !important; height:auto !important; display:block}
   .scan-status{font-size:13px; color:var(--muted); text-align:center; margin-top:12px; min-height:18px}
 
   .result{margin-top:18px; padding:20px; border-radius:16px; background:var(--surface);
@@ -235,8 +236,6 @@
       </div>
       <div id="reader"></div>
       <div class="scan-status" id="scanStatus"></div>
-      <div class="row"><button class="btn ghost" id="uploadBtn">Загрузить фото QR</button></div>
-      <input type="file" id="fileInput" accept="image/*" hidden />
       <div class="result" id="result">
         <div class="mark" id="resultMark">✓</div>
         <div class="who" id="resultWho"></div>

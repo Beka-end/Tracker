@@ -221,33 +221,44 @@
   $('scanBtn').addEventListener('click', startScanner);
   $('stopBtn').addEventListener('click', stopScanner);
   async function startScanner() {
-    if (typeof Html5Qrcode === 'undefined') { setStatus('Сканер не загрузился. Используйте «Загрузить фото QR».'); return; }
+    if (typeof Html5Qrcode === 'undefined') { setStatus('Сканер не загрузился. Обновите страницу.'); return; }
     hideResult();
+    scanner = scanner || new Html5Qrcode('reader');
+    scanning = true;
+    $('scanBtn').style.display = 'none'; $('stopBtn').style.display = 'block';
+    setStatus('Запрашиваем камеру…');
+    var config = { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1.0 };
+    var onHit = function (d) { onDecoded(d); };
+    // 1) пробуем заднюю камеру «мягко»
     try {
-      scanner = scanner || new Html5Qrcode('reader'); scanning = true;
-      $('scanBtn').style.display = 'none'; $('stopBtn').style.display = 'block';
+      await scanner.start({ facingMode: { ideal: 'environment' } }, config, onHit, function () {});
       setStatus('Наведите камеру на QR-код…');
-      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 230, height: 230 } }, function (d) { onDecoded(d); }, function () {});
-    } catch (e) {
-      scanning = false; $('scanBtn').style.display = 'block'; $('stopBtn').style.display = 'none';
-      setStatus('Камера недоступна. Нажмите «Загрузить фото QR».');
-    }
+      return;
+    } catch (e1) {}
+    // 2) запасной путь: получить список камер и выбрать заднюю/последнюю
+    try {
+      var cams = await Html5Qrcode.getCameras();
+      if (cams && cams.length) {
+        var back = cams.find(function (c) { return /back|rear|environment|задн/i.test(c.label || ''); }) || cams[cams.length - 1];
+        await scanner.start(back.id, config, onHit, function () {});
+        setStatus('Наведите камеру на QR-код…');
+        return;
+      }
+    } catch (e2) {}
+    // 3) совсем запасной путь: любая камера
+    try {
+      await scanner.start({ facingMode: 'user' }, config, onHit, function () {});
+      setStatus('Наведите камеру на QR-код…');
+      return;
+    } catch (e3) {}
+    scanning = false; $('scanBtn').style.display = 'block'; $('stopBtn').style.display = 'none';
+    setStatus('Камера недоступна. Разрешите доступ к камере в настройках браузера и попробуйте снова.');
   }
   async function stopScanner() {
     if (scanner && scanning) { try { await scanner.stop(); } catch (e) {} try { scanner.clear(); } catch (e) {} }
     scanning = false; $('scanBtn').style.display = 'block'; $('stopBtn').style.display = 'none';
     if (!$('result').classList.contains('show')) setStatus('');
   }
-  $('uploadBtn').addEventListener('click', function () { $('fileInput').click(); });
-  $('fileInput').addEventListener('change', async function (e) {
-    var f = e.target.files && e.target.files[0]; if (!f) return;
-    if (typeof Html5Qrcode === 'undefined') { setStatus('Сканер не загрузился.'); return; }
-    setStatus('Распознаём код на фото…');
-    var temp = new Html5Qrcode('reader');
-    try { var d = await temp.scanFile(f, false); onDecoded(d); }
-    catch (err) { setStatus('На фото не найден QR-код.'); }
-    finally { try { temp.clear(); } catch (e) {} $('fileInput').value = ''; }
-  });
 
   async function onDecoded(text) {
     if (busy) return; busy = true;
