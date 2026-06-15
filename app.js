@@ -249,9 +249,19 @@
     }
     rafId = requestAnimationFrame(scanLoop);
   }
+  function loadScript(src) { return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = function () { rej(new Error('fail')); }; document.head.appendChild(s); }); }
+  async function ensureJsQR() {
+    if (typeof jsQR !== 'undefined') return true;
+    var urls = ['https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js', 'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js', 'https://cdn.jsdelivr.net/npm/jsqr@1.3.1/dist/jsQR.min.js'];
+    for (var i = 0; i < urls.length; i++) { try { await loadScript(urls[i]); if (typeof jsQR !== 'undefined') return true; } catch (e) {} }
+    return typeof jsQR !== 'undefined';
+  }
+
   async function startScanner() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setStatus('Браузер не поддерживает камеру, либо сайт открыт не по https.'); return; }
-    if (typeof jsQR === 'undefined') { setStatus('Сканер не загрузился. Обновите страницу при нормальном интернете.'); return; }
+    setStatus('Загрузка сканера…');
+    var ready = await ensureJsQR();
+    if (!ready) { setStatus('Сканер не загрузился. Проверьте интернет и обновите страницу.'); return; }
     hideResult();
     var reader = $('reader');
     if (!video) { video = document.createElement('video'); video.setAttribute('playsinline', ''); video.setAttribute('autoplay', ''); video.muted = true; }
