@@ -220,43 +220,62 @@
 
   $('scanBtn').addEventListener('click', startScanner);
   $('stopBtn').addEventListener('click', stopScanner);
+
+  var video = null, stream = null, rafId = null;
+  var canvas = document.createElement('canvas');
+  var cctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  function camError(e) {
+    var n = (e && e.name) || '';
+    if (n === 'NotAllowedError' || n === 'SecurityError') return 'Доступ к камере запрещён. Разрешите камеру для этого сайта в настройках браузера и попробуйте снова.';
+    if (n === 'NotFoundError' || n === 'OverconstrainedError' || n === 'DevicesNotFoundError') return 'Камера на устройстве не найдена.';
+    if (n === 'NotReadableError' || n === 'TrackStartError') return 'Камера занята другим приложением. Закройте программы, использующие камеру, и попробуйте снова.';
+    return 'Не удалось открыть камеру: ' + (n || e);
+  }
+  async function openCamera() {
+    try { return await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+    catch (e1) { return await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }
+  }
+  function scanLoop() {
+    if (!scanning) return;
+    if (video && video.readyState >= 2 && video.videoWidth) {
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      cctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      try {
+        var img = cctx.getImageData(0, 0, canvas.width, canvas.height);
+        var res = (typeof jsQR !== 'undefined') ? jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' }) : null;
+        if (res && res.data) { onDecoded(res.data); return; }
+      } catch (e) {}
+    }
+    rafId = requestAnimationFrame(scanLoop);
+  }
   async function startScanner() {
-    if (typeof Html5Qrcode === 'undefined') { setStatus('Сканер не загрузился. Обновите страницу.'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setStatus('Браузер не поддерживает камеру, либо сайт открыт не по https.'); return; }
+    if (typeof jsQR === 'undefined') { setStatus('Сканер не загрузился. Обновите страницу при нормальном интернете.'); return; }
     hideResult();
-    scanner = scanner || new Html5Qrcode('reader');
-    scanning = true;
+    var reader = $('reader');
+    if (!video) { video = document.createElement('video'); video.setAttribute('playsinline', ''); video.setAttribute('autoplay', ''); video.muted = true; }
+    reader.innerHTML = ''; reader.appendChild(video);
     $('scanBtn').style.display = 'none'; $('stopBtn').style.display = 'block';
     setStatus('Запрашиваем камеру…');
-    var config = { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1.0 };
-    var onHit = function (d) { onDecoded(d); };
-    // 1) пробуем заднюю камеру «мягко»
-    try {
-      await scanner.start({ facingMode: { ideal: 'environment' } }, config, onHit, function () {});
-      setStatus('Наведите камеру на QR-код…');
-      return;
-    } catch (e1) {}
-    // 2) запасной путь: получить список камер и выбрать заднюю/последнюю
-    try {
-      var cams = await Html5Qrcode.getCameras();
-      if (cams && cams.length) {
-        var back = cams.find(function (c) { return /back|rear|environment|задн/i.test(c.label || ''); }) || cams[cams.length - 1];
-        await scanner.start(back.id, config, onHit, function () {});
-        setStatus('Наведите камеру на QR-код…');
-        return;
-      }
-    } catch (e2) {}
-    // 3) совсем запасной путь: любая камера
-    try {
-      await scanner.start({ facingMode: 'user' }, config, onHit, function () {});
-      setStatus('Наведите камеру на QR-код…');
-      return;
-    } catch (e3) {}
-    scanning = false; $('scanBtn').style.display = 'block'; $('stopBtn').style.display = 'none';
-    setStatus('Камера недоступна. Разрешите доступ к камере в настройках браузера и попробуйте снова.');
+    try { stream = await openCamera(); }
+    catch (e) {
+      reader.innerHTML = ''; $('scanBtn').style.display = 'block'; $('stopBtn').style.display = 'none';
+      setStatus(camError(e)); return;
+    }
+    video.srcObject = stream;
+    try { await video.play(); } catch (e) {}
+    scanning = true;
+    setStatus('Наведите камеру на QR-код со «Станции».');
+    rafId = requestAnimationFrame(scanLoop);
   }
   async function stopScanner() {
-    if (scanner && scanning) { try { await scanner.stop(); } catch (e) {} try { scanner.clear(); } catch (e) {} }
-    scanning = false; $('scanBtn').style.display = 'block'; $('stopBtn').style.display = 'none';
+    scanning = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (stream) { stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} }); stream = null; }
+    if (video) { try { video.srcObject = null; } catch (e) {} }
+    $('reader').innerHTML = '';
+    $('scanBtn').style.display = 'block'; $('stopBtn').style.display = 'none';
     if (!$('result').classList.contains('show')) setStatus('');
   }
 

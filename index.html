@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Учёт прихода</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
 <style>
@@ -90,10 +90,11 @@
   .btn:focus-visible{outline:2px solid var(--brass); outline-offset:2px}
   .row{display:flex; gap:10px} .row .btn{flex:1}
 
-  #reader{margin-top:6px; border-radius:14px; overflow:hidden; border:1px solid var(--line-strong)}
+  #reader{margin-top:6px; border-radius:14px; overflow:hidden; border:1px solid var(--line-strong); position:relative}
   #reader:empty{display:none}
   #reader:not(:empty){min-height:260px; background:#000}
   #reader video{width:100% !important; height:auto !important; display:block}
+  #reader:not(:empty)::after{content:""; position:absolute; left:15%; top:15%; right:15%; bottom:15%; border:3px solid rgba(255,255,255,.9); border-radius:16px; pointer-events:none}
   .scan-status{font-size:13px; color:var(--muted); text-align:center; margin-top:12px; min-height:18px}
 
   .result{margin-top:18px; padding:20px; border-radius:16px; background:var(--surface);
