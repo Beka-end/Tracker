@@ -32,6 +32,14 @@
     h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507); h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
     return 4294967296 * (2097151 & h2) + (h1 >>> 0); }
   var _dev = null;
+  function deviceUID() {
+    try {
+      var k = 'att_device_uid';
+      var v = localStorage.getItem(k);
+      if (!v) { v = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)); localStorage.setItem(k, v); }
+      return v;
+    } catch (e) { return ''; }
+  }
   async function gatherDevice() {
     if (_dev) return _dev;
     var ua = navigator.userAgent || '', model = '', os = 'ПК', br = '';
@@ -76,7 +84,8 @@
     if (!pass) { $('loginErr').textContent = 'Введите пароль.'; return; }
     btn.disabled = true; btn.textContent = 'Вход…';
     try {
-      var r = await api('login', { method: 'POST', body: JSON.stringify({ iin: iin, password: pass }) });
+      var dev = await gatherDevice();
+      var r = await api('login', { method: 'POST', body: JSON.stringify({ iin: iin, password: pass, uid: deviceUID(), deviceLabel: dev.label }) });
       if (r.ok && r.data.user) { currentUser = r.data.user; $('loginPass').value = ''; enterApp(); }
       else { $('loginErr').textContent = r.data.error || 'Не удалось войти.'; }
     } catch (e) { $('loginErr').textContent = 'Сбой сети.'; }
@@ -152,13 +161,37 @@
   $('empSaveBtn').addEventListener('click', saveEmployee);
   async function saveEmployee() {
     $('empErr').textContent = '';
-    var iin = $('empIin').value.trim(), fio = $('empFio').value.trim(), pass = $('empPass').value, role = $('empRole').value;
+    var company = $('empCompany').value.trim(), iin = $('empIin').value.trim(), fio = $('empFio').value.trim(), pass = $('empPass').value, role = $('empRole').value;
     if (!/^\d{12}$/.test(iin)) { $('empErr').textContent = 'ИИН должен состоять из 12 цифр.'; return; }
     if (fio.length < 3) { $('empErr').textContent = 'Укажите ФИО.'; return; }
-    var r = await api('employees', { method: 'POST', body: JSON.stringify({ action: 'upsert', iin: iin, fio: fio, password: pass, role: role }) });
+    var r = await api('employees', { method: 'POST', body: JSON.stringify({ action: 'upsert', iin: iin, fio: fio, password: pass, role: role, company: company }) });
     if (!r.ok) { $('empErr').textContent = r.data.error || 'Ошибка сохранения.'; return; }
-    $('empIin').value = ''; $('empFio').value = ''; $('empPass').value = ''; $('empRole').value = 'employee';
+    $('empCompany').value = ''; $('empIin').value = ''; $('empFio').value = ''; $('empPass').value = ''; $('empRole').value = 'employee';
     editingIin = null; $('empSaveBtn').textContent = 'Сохранить сотрудника';
+    renderEmployees();
+  }
+  $('bulkBtn').addEventListener('click', bulkImport);
+  async function bulkImport() {
+    var msg = $('bulkMsg'); msg.style.color = 'var(--muted)'; msg.textContent = '';
+    var text = $('bulkText').value.trim();
+    if (!text) { msg.textContent = 'Вставьте список.'; return; }
+    var rows = [];
+    text.split(/\r?\n/).forEach(function (line) {
+      line = line.trim(); if (!line) return;
+      var parts = line.split(/[;\t]/).map(function (x) { return x.trim(); });
+      if (parts.length < 4 && line.indexOf(';') < 0) parts = line.split(','); // запасной разделитель
+      rows.push({ company: parts[0] || '', iin: parts[1] || '', fio: parts[2] || '', password: parts[3] || '' });
+    });
+    // пропускаем строку-заголовок, если она есть
+    if (rows.length && !/^\d{12}$/.test(rows[0].iin) && /иин|iin/i.test(rows[0].iin + rows[0].fio + rows[0].company)) rows.shift();
+    $('bulkBtn').disabled = true; $('bulkBtn').textContent = 'Импорт…';
+    var r = await api('employees', { method: 'POST', body: JSON.stringify({ action: 'import', rows: rows }) });
+    $('bulkBtn').disabled = false; $('bulkBtn').textContent = 'Импортировать список';
+    if (!r.ok) { msg.style.color = 'var(--red)'; msg.textContent = r.data.error || 'Ошибка импорта.'; return; }
+    var d = r.data;
+    msg.style.color = (d.errors && d.errors.length) ? 'var(--red)' : 'var(--green)';
+    msg.innerHTML = 'Добавлено: ' + d.added + ', обновлено: ' + d.updated + (d.errors && d.errors.length ? ('<br>Пропущено ' + d.errors.length + ':<br>' + d.errors.map(esc).join('<br>')) : '');
+    if (!(d.errors && d.errors.length)) $('bulkText').value = '';
     renderEmployees();
   }
   async function renderEmployees() {
@@ -174,9 +207,11 @@
     list.innerHTML = emps.map(function (e) {
       var badge = e.role === 'admin' ? '<span class="badge admin">админ</span>' : '';
       var dev = e.bound ? ('📱 ' + esc(e.deviceLabel || 'устройство закреплено')) : '📱 не закреплено';
+      var login = e.lastDevice ? (' · вход: ' + esc(e.lastDevice)) : '';
+      var comp = e.company ? (esc(e.company) + ' · ') : '';
       var reset = e.bound ? '<button class="iconbtn" data-resetdev="' + e.iin + '" title="Сбросить устройство">⟲</button>' : '';
       return '<div class="rec"><div class="avatar">' + initials(e.fio) + '</div>' +
-        '<div class="info"><div class="n">' + esc(e.fio) + ' ' + badge + '</div><div class="d">' + e.iin + '</div><div class="d2">' + dev + '</div></div>' +
+        '<div class="info"><div class="n">' + esc(e.fio) + ' ' + badge + '</div><div class="d">' + comp + e.iin + '</div><div class="d2">' + dev + login + '</div></div>' +
         '<div class="acts">' + reset + '<button class="iconbtn" data-edit="' + e.iin + '" title="Изменить">✎</button>' +
         '<button class="iconbtn danger" data-del="' + e.iin + '" title="Удалить">✕</button></div></div>';
     }).join('');
@@ -186,7 +221,7 @@
   }
   function startEdit(iin, emps) {
     var e = emps.find(function (x) { return x.iin === iin; }); if (!e) return;
-    $('empIin').value = e.iin; $('empFio').value = e.fio; $('empPass').value = ''; $('empRole').value = e.role;
+    $('empCompany').value = e.company || ''; $('empIin').value = e.iin; $('empFio').value = e.fio; $('empPass').value = ''; $('empRole').value = e.role;
     editingIin = iin; $('empSaveBtn').textContent = 'Обновить сотрудника';
     $('view-employees').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -210,11 +245,13 @@
     if (r.status === 401) { showLogin(); return; }
     var el = $('ciStatus');
     if (r.ok) {
+      if (currentUser) currentUser.bio = !!r.data.bio;
       var rec = r.data.today, shift = r.data.shiftStart;
       if (!rec) { el.className = 'ci-status'; el.textContent = 'Сегодня ещё не отмечались. Сканирование зафиксирует приход (смена с ' + shift + ').'; }
       else if (!rec.out) { el.className = 'ci-status'; el.innerHTML = 'Приход: <b>' + rec.in + '</b>' + (rec.lateMin > 0 ? (' · опоздание ' + rec.lateMin + ' мин') : ' · вовремя') + '. Следующее сканирование — уход.'; }
       else { el.className = 'ci-status done'; el.innerHTML = 'Приход: <b>' + rec.in + '</b> · Уход: <b>' + rec.out + '</b> · отработано ' + fmtDur(workedMin(rec)) + '. День закрыт.'; }
     }
+    updateBioUI();
     gatherDevice().then(function (d) { $('ciDevice').textContent = 'Устройство: ' + d.label; });
   }
 
@@ -292,8 +329,13 @@
   async function onDecoded(text) {
     if (busy) return; busy = true;
     await stopScanner();
+    if (currentUser && currentUser.bio) {
+      setStatus('Подтвердите Face ID / отпечаток…');
+      var ok = await bioAuthenticate();
+      if (!ok) { showResult('err', 'Не подтверждено', '', 'Нужно подтверждение Face ID / отпечатком. Попробуйте ещё раз.'); busy = false; return; }
+    }
     var dev = await gatherDevice();
-    var r = await api('checkin', { method: 'POST', body: JSON.stringify({ code: text, deviceId: dev.id, deviceLabel: dev.label }) });
+    var r = await api('checkin', { method: 'POST', body: JSON.stringify({ code: text, deviceId: deviceUID(), deviceLabel: dev.label }) });
     if (r.status === 401) { showLogin(); busy = false; return; }
     var d = r.data || {};
     showResult(d.kind || 'err', d.title || 'Ошибка', d.meta || '', d.note || '');
@@ -306,6 +348,56 @@
     $('resultWho').textContent = who; $('resultMeta').textContent = meta || ''; $('resultNote').textContent = note || ''; setStatus('');
   }
   function hideResult() { $('result').className = 'result'; }
+
+  /* ---------- Face ID (WebAuthn) ---------- */
+  function bioSupported() { return typeof SimpleWebAuthnBrowser !== 'undefined' && window.PublicKeyCredential; }
+  function updateBioUI() {
+    var card = $('bioCard');
+    if (!bioSupported()) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+    if (currentUser && currentUser.bio) {
+      $('bioStatus').textContent = 'Включён. При отметке потребуется Face ID / отпечаток.';
+      $('bioStatus').className = 'ci-status done';
+      $('bioBtn').textContent = 'Отключить';
+    } else {
+      $('bioStatus').textContent = 'Не включён. Можно включить на этом устройстве.';
+      $('bioStatus').className = 'ci-status';
+      $('bioBtn').textContent = 'Включить';
+    }
+  }
+  $('bioBtn').addEventListener('click', async function () {
+    var btn = this; btn.disabled = true;
+    try {
+      if (currentUser && currentUser.bio) {
+        if (confirm('Отключить вход по Face ID для вашей учётной записи?')) {
+          var d = await api('webauthn', { method: 'POST', body: JSON.stringify({ action: 'disable' }) });
+          if (d.ok) { currentUser.bio = false; updateBioUI(); }
+        }
+      } else {
+        await bioRegister();
+      }
+    } finally { btn.disabled = false; }
+  });
+  async function bioRegister() {
+    if (!bioSupported()) { alert('Это устройство/браузер не поддерживает Face ID для сайтов.'); return; }
+    var r = await api('webauthn?action=register-options');
+    if (!r.ok || !r.data.options) { alert((r.data && r.data.error) || 'Не удалось начать регистрацию.'); return; }
+    var att;
+    try { att = await SimpleWebAuthnBrowser.startRegistration({ optionsJSON: r.data.options }); }
+    catch (e) { alert('Не удалось включить Face ID: ' + ((e && e.message) || e)); return; }
+    var v = await api('webauthn', { method: 'POST', body: JSON.stringify({ action: 'register-verify', response: att }) });
+    if (v.ok && v.data.verified) { currentUser.bio = true; updateBioUI(); alert('Face ID включён.'); }
+    else alert((v.data && v.data.error) || 'Не удалось подтвердить.');
+  }
+  async function bioAuthenticate() {
+    var r = await api('webauthn?action=auth-options');
+    if (!r.ok || !r.data.options) return false;
+    var asse;
+    try { asse = await SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: r.data.options }); }
+    catch (e) { return false; }
+    var v = await api('webauthn', { method: 'POST', body: JSON.stringify({ action: 'auth-verify', response: asse }) });
+    return !!(v.ok && v.data.verified);
+  }
 
   /* ---------- journal ---------- */
   function defaultPeriod() {
@@ -326,9 +418,10 @@
     if (!rows.length) { list.innerHTML = '<div class="empty"><div class="big">🗂️</div>' + (r.data.total ? 'За выбранный период отметок нет.' : 'Отметок пока нет.') + '</div>'; return; }
     list.innerHTML = rows.map(function (rr) {
       var late = rr.late ? '<span class="badge late">+' + rr.lateMin + 'м</span>' : '';
+      var comp = rr.company ? (esc(rr.company) + ' · ') : '';
       var devLine = (rr.device || rr.ip) ? ('<div class="d2">📱 ' + esc(rr.device || '—') + ' · IP ' + esc(rr.ip || '—') + '</div>') : '';
       return '<div class="rec"><div class="avatar">' + initials(rr.fio) + '</div>' +
-        '<div class="info"><div class="n">' + esc(rr.fio) + ' ' + late + '</div><div class="d">' + rr.iin + ' · ' + rr.date + '</div>' + devLine + '</div>' +
+        '<div class="info"><div class="n">' + esc(rr.fio) + ' ' + late + '</div><div class="d">' + comp + rr.iin + ' · ' + rr.date + '</div>' + devLine + '</div>' +
         '<div class="jtimes"><div><span>приход</span>' + rr.in + '</div><div><span>уход</span>' + (rr.out||'—') + '</div><div class="jw">' + fmtDur(workedMin(rr)) + '</div></div></div>';
     }).join('');
   }
@@ -339,8 +432,8 @@
   }
   $('csvBtn').addEventListener('click', function () {
     var rows = lastRows.slice().sort(function (a, b) { return a.ts - b.ts; });
-    var data = [['№','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','IP']]
-      .concat(rows.map(function (r, i) { return [i+1, r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.ip||'']; }));
+    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','IP']]
+      .concat(rows.map(function (r, i) { return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.ip||'']; }));
     var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'prihod-' + $('fromDate').value + '_' + $('toDate').value + '.csv');
   });
@@ -349,23 +442,23 @@
     if (!rows.length) { alert('За выбранный период нет отметок.'); return; }
     if (typeof pdfMake === 'undefined') { alert('Модуль PDF не загрузился.'); return; }
     var now = new Date(), lateCount = rows.filter(function (r) { return r.late; }).length;
-    var body = [['№','ФИО','ИИН','Дата','Приход','Уход','Часы','Опозд.','Устройство','IP'].map(function (h) { return { text: h, style: 'th' }; })];
+    var body = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опозд.','Устройство','IP'].map(function (h) { return { text: h, style: 'th' }; })];
     rows.forEach(function (r, i) { body.push([
-      { text: String(i+1) }, { text: r.fio }, { text: r.iin }, { text: r.date },
+      { text: String(i+1) }, { text: r.company||'—' }, { text: r.fio }, { text: r.iin }, { text: r.date },
       { text: r.in||'—' }, { text: r.out||'—' }, { text: fmtDur(workedMin(r)) },
       { text: r.lateMin ? (r.lateMin + 'м') : '—', color: r.late ? '#c0392b' : '#000' },
-      { text: r.device||'—', fontSize: 8 }, { text: r.ip||'—', fontSize: 8 },
+      { text: r.device||'—', fontSize: 7 }, { text: r.ip||'—', fontSize: 7 },
     ]); });
     var dd = {
-      pageSize: 'A4', pageOrientation: 'landscape', pageMargins: [24, 50, 24, 40],
+      pageSize: 'A4', pageOrientation: 'landscape', pageMargins: [20, 50, 20, 40],
       content: [
         { text: 'Отчёт по приходу сотрудников', fontSize: 15, bold: true, margin: [0,0,0,3] },
         { text: periodLabel(), fontSize: 10, color: '#666' },
         { text: 'Всего отметок: ' + rows.length + '   ·   Опозданий: ' + lateCount + '   ·   Сформировано: ' + todayStr(now) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()), fontSize: 9, color: '#888', margin: [0,1,0,12] },
-        { table: { headerRows: 1, widths: [16,120,68,52,38,38,42,34,'*',70], body: body }, layout: 'lightHorizontalLines' },
+        { table: { headerRows: 1, widths: [14,90,'*',64,46,32,32,36,28,86,62], body: body }, layout: 'lightHorizontalLines' },
       ],
-      styles: { th: { bold: true, fillColor: '#f0f0f0', fontSize: 9 } },
-      defaultStyle: { fontSize: 9 },
+      styles: { th: { bold: true, fillColor: '#f0f0f0', fontSize: 8 } },
+      defaultStyle: { fontSize: 8 },
       footer: function (cur, total) { return { text: cur + ' / ' + total, alignment: 'center', fontSize: 8, color: '#999', margin: [0,6,0,0] }; },
     };
     pdfMake.createPdf(dd).download('prihod-' + $('fromDate').value + '_' + $('toDate').value + '.pdf');

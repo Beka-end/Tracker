@@ -63,6 +63,18 @@ export function setSessionCookie(res, token) {
 export function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', `sess=; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=0`);
 }
+export function setExtraCookie(res, name, value, maxAge) {
+  const cookie = `${name}=${value}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${maxAge}`;
+  const prev = res.getHeader('Set-Cookie');
+  if (prev) res.setHeader('Set-Cookie', Array.isArray(prev) ? prev.concat(cookie) : [prev, cookie]);
+  else res.setHeader('Set-Cookie', cookie);
+}
+export function rpInfo(req) {
+  const hostHeader = req.headers['x-forwarded-host'] || req.headers.host || '';
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  const rpID = String(hostHeader).split(':')[0];
+  return { rpID, origin: `${proto}://${hostHeader}` };
+}
 
 /* ===== Сотрудники / настройки / сидирование ===== */
 export async function getEmployees() { return getJSON('employees', null); }

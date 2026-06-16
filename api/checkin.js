@@ -1,6 +1,6 @@
 import {
   currentUser, getSettings, getEmployees, saveEmployees, getJSON, setJSON,
-  localNow, slotCode, clientIP, readBody,
+  localNow, slotCode, clientIP, readBody, verifySession, getCookie,
 } from './_lib.js';
 
 function toMin(h) { if (!h) return 0; const p = h.split(':'); return (+p[0]) * 60 + (+p[1]); }
@@ -18,7 +18,10 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const log = (await getJSON('attendance', [])) || [];
       const rec = log.find((r) => r.iin === user.iin && r.date === now.date);
-      return res.json({ shiftStart: s.shiftStart, today: rec || null, worked: rec ? workedMin(rec) : null });
+      const emps = (await getEmployees()) || [];
+      const me = emps.find((e) => e.iin === user.iin);
+      const bio = !!(me && me.webauthn && me.webauthn.length);
+      return res.json({ shiftStart: s.shiftStart, today: rec || null, worked: rec ? workedMin(rec) : null, bio });
     }
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
@@ -42,6 +45,15 @@ export default async function handler(req, res) {
     // ----- привязка устройства -----
     const emps = (await getEmployees()) || [];
     const me = emps.find((e) => e.iin === user.iin);
+
+    // ----- Face ID: если включён, нужен свежий биопропуск -----
+    if (me && me.webauthn && me.webauthn.length) {
+      const bp = verifySession(getCookie(req, 'biopass'));
+      if (!bp || bp.iin !== user.iin || (Date.now() - (bp.t || 0)) > 2 * 60 * 1000) {
+        return res.json({ ok: false, kind: 'err', title: 'Нужен Face ID', note: 'Подтвердите личность по Face ID/отпечатку и повторите.' });
+      }
+    }
+
     if (me) {
       if (!me.deviceId) {
         me.deviceId = deviceId || 'unknown';
@@ -63,7 +75,7 @@ export default async function handler(req, res) {
       const lateMin = Math.max(0, toMin(now.time) - toMin(s.shiftStart));
       rec = {
         id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-        iin: user.iin, fio: user.fio, date: now.date,
+        iin: user.iin, fio: user.fio, company: (me && me.company) || user.company || '', date: now.date,
         in: now.time, out: null, shiftStart: s.shiftStart,
         late: lateMin > 0, lateMin,
         device: deviceLabel || '', deviceId: deviceId || '', ip, ts: now.ts, outTs: null,

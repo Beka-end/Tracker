@@ -6,6 +6,7 @@
 <title>Учёт прихода</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://unpkg.com/@simplewebauthn/browser@13.3.0/dist/bundle/index.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
 <style>
@@ -195,6 +196,7 @@
       </div>
       <p class="section-title">Добавить / изменить сотрудника</p>
       <div class="card">
+        <div class="field"><label for="empCompany">Название компании</label><input type="text" id="empCompany" placeholder="ООО «Клиника»" /></div>
         <div class="field"><label for="empIin">ИИН (12 цифр)</label><input type="text" id="empIin" inputmode="numeric" maxlength="12" placeholder="000000000000" /></div>
         <div class="field"><label for="empFio">Фамилия Имя Отчество</label><input type="text" id="empFio" placeholder="Иванов Иван Иванович" /></div>
         <div class="grid2">
@@ -203,6 +205,16 @@
         </div>
         <button class="btn" id="empSaveBtn">Сохранить сотрудника</button>
         <div class="err" id="empErr"></div>
+      </div>
+
+      <p class="section-title">Загрузка списком</p>
+      <div class="card">
+        <div class="field" style="margin-bottom:10px">
+          <label for="bulkText">Каждая строка: Компания;ИИН;ФИО;Пароль</label>
+          <textarea id="bulkText" rows="5" placeholder="ООО «Клиника»;850101300123;Иванов Иван Иванович;pass123&#10;ООО «Клиника»;900202400234;Петрова Анна;pass456" style="width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);color:var(--text);font-size:14px;font-family:var(--mono);resize:vertical"></textarea>
+        </div>
+        <button class="btn secondary" id="bulkBtn">Импортировать список</button>
+        <div class="err" id="bulkMsg" style="color:var(--muted)"></div>
       </div>
       <div class="head-row"><p class="section-title" style="margin:0">Список сотрудников</p><span class="count" id="empCount"></span></div>
       <div class="list" id="empList"></div>
@@ -231,6 +243,15 @@
         <div id="ciWho" style="font-size:16px;font-weight:650;margin-top:2px">—</div>
         <div id="ciStatus" class="ci-status"></div>
         <div id="ciDevice" class="ci-status" style="font-family:var(--mono);font-size:11px;color:#5b6473"></div>
+      </div>
+      <div class="card" id="bioCard" style="margin-bottom:14px; display:none">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px">
+          <div>
+            <div style="font-size:14px; font-weight:650">Вход по Face ID / отпечатку</div>
+            <div id="bioStatus" class="ci-status" style="margin-top:2px">Не включён на этом устройстве.</div>
+          </div>
+          <button class="btn sm secondary" id="bioBtn" style="white-space:nowrap">Включить</button>
+        </div>
       </div>
       <div class="row" style="margin-bottom:12px">
         <button class="btn" id="scanBtn">Сканировать QR</button>

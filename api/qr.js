@@ -6,6 +6,7 @@ export default async function handler(req, res) {
     if (!admin) return res.status(403).json({ error: 'Только для администратора' });
     const s = await getSettings();
     const now = localNow(s.tz);
+    res.setHeader('Cache-Control', 'no-store');
     return res.json({
       payload: payloadFor(now.slot, s.qrSalt),
       code: slotCode(now.slot, s.qrSalt),
