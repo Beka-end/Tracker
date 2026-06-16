@@ -34,7 +34,7 @@ export default async function handler(req, res) {
           if (password) ex.pass = hashPassword(password);
         } else {
           if (!password) return res.status(400).json({ error: 'Для нового сотрудника задайте пароль' });
-          emps.push({ iin, fio: String(fio).trim(), role: r, company: (company || '').trim(), pass: hashPassword(password) });
+          emps.push({ iin, fio: String(fio).trim(), role: r, company: (company || '').trim(), pass: hashPassword(password), mustChange: true });
         }
         await saveEmployees(emps);
         return res.json({ ok: true });
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
             updated++;
           } else {
             if (!password) { errors.push('Строка ' + (i + 1) + ' (' + iin + '): нет пароля'); return; }
-            emps.push({ iin, fio, role: 'employee', company, pass: hashPassword(password) });
+            emps.push({ iin, fio, role: 'employee', company, pass: hashPassword(password), mustChange: true });
             added++;
           }
         });

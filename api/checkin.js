@@ -1,6 +1,6 @@
 import {
   currentUser, getSettings, getEmployees, saveEmployees, getJSON, setJSON,
-  localNow, slotCode, clientIP, readBody, verifySession, getCookie,
+  localNow, slotCode, clientIP, readBody, logEvent, getOrSetDeviceId,
 } from './_lib.js';
 
 function toMin(h) { if (!h) return 0; const p = h.split(':'); return (+p[0]) * 60 + (+p[1]); }
@@ -13,61 +13,54 @@ export default async function handler(req, res) {
     const s = await getSettings();
     const tz = s.tz;
     const now = localNow(tz);
+    const ip = clientIP(req);
 
     // ----- статус текущего дня -----
     if (req.method === 'GET') {
       const log = (await getJSON('attendance', [])) || [];
       const rec = log.find((r) => r.iin === user.iin && r.date === now.date);
-      const emps = (await getEmployees()) || [];
-      const me = emps.find((e) => e.iin === user.iin);
-      const bio = !!(me && me.webauthn && me.webauthn.length);
-      return res.json({ shiftStart: s.shiftStart, today: rec || null, worked: rec ? workedMin(rec) : null, bio });
+      return res.json({ shiftStart: s.shiftStart, today: rec || null, worked: rec ? workedMin(rec) : null });
     }
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
 
     const body = await readBody(req);
-    const { code, deviceId, deviceLabel } = body;
+    const { code, deviceLabel, geo } = body;
+    const deviceId = getOrSetDeviceId(req, res); // стабильный идентификатор устройства из cookie
+
+    const fail = async (title, note, reason) => {
+      await logEvent({ type: 'checkin', ok: false, iin: user.iin, fio: user.fio, reason: reason || title, ip, device: deviceLabel || '', uid: deviceId || '', geo: geo || null });
+      return res.json({ ok: false, kind: 'err', title, note });
+    };
 
     // ----- проверка QR-кода на сервере -----
     let data; try { data = JSON.parse(code); } catch { data = null; }
     if (!data || data.t !== 'attend' || !data.s || !data.c) {
-      return res.json({ ok: false, kind: 'err', title: 'Неверный код', note: 'Отсканируйте код со станции.' });
+      return fail('Неверный код', 'Отсканируйте код со станции.', 'неверный код');
     }
     const prev = localNow(tz, new Date(Date.now() - 60000));
     const valid =
       (data.s === now.slot && data.c === slotCode(now.slot, s.qrSalt)) ||
       (data.s === prev.slot && data.c === slotCode(prev.slot, s.qrSalt));
     if (!valid) {
-      return res.json({ ok: false, kind: 'err', title: 'Код устарел', note: 'Код действует одну минуту — отсканируйте текущий.' });
+      return fail('Код устарел', 'Код действует одну минуту — отсканируйте текущий.', 'просроченный код');
     }
 
     // ----- привязка устройства -----
     const emps = (await getEmployees()) || [];
     const me = emps.find((e) => e.iin === user.iin);
-
-    // ----- Face ID: если включён, нужен свежий биопропуск -----
-    if (me && me.webauthn && me.webauthn.length) {
-      const bp = verifySession(getCookie(req, 'biopass'));
-      if (!bp || bp.iin !== user.iin || (Date.now() - (bp.t || 0)) > 2 * 60 * 1000) {
-        return res.json({ ok: false, kind: 'err', title: 'Нужен Face ID', note: 'Подтвердите личность по Face ID/отпечатку и повторите.' });
-      }
-    }
-
     if (me) {
       if (!me.deviceId) {
         me.deviceId = deviceId || 'unknown';
         me.deviceLabel = deviceLabel || 'устройство';
         await saveEmployees(emps);
       } else if (deviceId && me.deviceId !== deviceId) {
-        return res.json({
-          ok: false, kind: 'err', title: 'Чужое устройство',
-          note: 'Отметка возможна только с вашего устройства (' + (me.deviceLabel || 'закреплённого') + '). Для смены телефона обратитесь к администратору.',
-        });
+        return fail('Чужое устройство',
+          'Отметка возможна только с вашего устройства (' + (me.deviceLabel || 'закреплённого') + '). Для смены телефона обратитесь к администратору.',
+          'чужое устройство');
       }
     }
 
-    const ip = clientIP(req);
     const log = (await getJSON('attendance', [])) || [];
     let rec = log.find((r) => r.iin === user.iin && r.date === now.date);
 
@@ -78,18 +71,20 @@ export default async function handler(req, res) {
         iin: user.iin, fio: user.fio, company: (me && me.company) || user.company || '', date: now.date,
         in: now.time, out: null, shiftStart: s.shiftStart,
         late: lateMin > 0, lateMin,
-        device: deviceLabel || '', deviceId: deviceId || '', ip, ts: now.ts, outTs: null,
+        device: deviceLabel || '', deviceId: deviceId || '', ip, geo: geo || null, ts: now.ts, outTs: null,
       };
       log.push(rec);
       await setJSON('attendance', log);
+      await logEvent({ type: 'checkin', ok: true, iin: user.iin, fio: user.fio, reason: 'приход', ip, device: deviceLabel || '', uid: deviceId || '', geo: geo || null });
       return res.json({
         ok: true, kind: 'ok', title: 'Приход — ' + user.fio,
         meta: now.date + ' · ' + now.time,
         note: lateMin > 0 ? ('Опоздание ' + lateMin + ' мин (смена с ' + s.shiftStart + ').') : 'Вовремя. Хорошего дня!',
       });
     } else {
-      rec.out = now.time; rec.outTs = now.ts; rec.outIp = ip;
+      rec.out = now.time; rec.outTs = now.ts; rec.outIp = ip; rec.outGeo = geo || null;
       await setJSON('attendance', log);
+      await logEvent({ type: 'checkin', ok: true, iin: user.iin, fio: user.fio, reason: 'уход', ip, device: deviceLabel || '', uid: deviceId || '', geo: geo || null });
       return res.json({
         ok: true, kind: 'ok', title: 'Уход — ' + user.fio,
         meta: 'приход ' + rec.in + ' → уход ' + now.time,

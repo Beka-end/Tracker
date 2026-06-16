@@ -58,7 +58,7 @@ export function getCookie(req, name) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 export function setSessionCookie(res, token) {
-  res.setHeader('Set-Cookie', `sess=${token}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${60 * 60 * 12}`);
+  res.setHeader('Set-Cookie', `sess=${token}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${60 * 60 * 24 * 30}`);
 }
 export function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', `sess=; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=0`);
@@ -74,6 +74,16 @@ export function rpInfo(req) {
   const proto = req.headers['x-forwarded-proto'] || 'https';
   const rpID = String(hostHeader).split(':')[0];
   return { rpID, origin: `${proto}://${hostHeader}` };
+}
+// Стабильный идентификатор устройства: хранится в httpOnly-cookie на 1 год.
+// Это надёжнее localStorage (его Safari/браузер периодически очищает).
+export function getOrSetDeviceId(req, res) {
+  let did = getCookie(req, 'did');
+  if (!did) {
+    did = (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'));
+    setExtraCookie(res, 'did', did, 60 * 60 * 24 * 365);
+  }
+  return did;
 }
 
 /* ===== Сотрудники / настройки / сидирование ===== */
@@ -97,7 +107,7 @@ export async function ensureSeed() {
   if (emps == null) {
     const iin = process.env.ADMIN_IIN || '111111111111';
     const pw = process.env.ADMIN_PASSWORD || 'admin';
-    emps = [{ iin, fio: process.env.ADMIN_FIO || 'Администратор', role: 'admin', pass: hashPassword(pw) }];
+    emps = [{ iin, fio: process.env.ADMIN_FIO || 'Администратор', role: 'admin', pass: hashPassword(pw), mustChange: true }];
     await saveEmployees(emps);
     await getSettings(); // создаст настройки и секрет QR
   }
@@ -120,6 +130,14 @@ export function clientIP(req) {
   const xf = req.headers['x-forwarded-for'];
   if (xf) return String(xf).split(',')[0].trim();
   return (req.socket && req.socket.remoteAddress) || '';
+}
+export async function logEvent(ev) {
+  try {
+    const arr = (await getJSON('events', [])) || [];
+    arr.push(Object.assign({ ts: Date.now() }, ev));
+    if (arr.length > 5000) arr.splice(0, arr.length - 5000);
+    await setJSON('events', arr);
+  } catch (e) {}
 }
 export async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;

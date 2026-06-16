@@ -6,7 +6,6 @@
 <title>Учёт прихода</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="https://unpkg.com/@simplewebauthn/browser@13.3.0/dist/bundle/index.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
 <style>
@@ -157,6 +156,21 @@
   </div>
 </div>
 
+<!-- СМЕНА ПАРОЛЯ (первый вход) -->
+<div class="login" id="changepw" style="display:none">
+  <div class="login-card">
+    <div class="logo"><div class="dot">✓</div><div class="t"><b>Смена пароля</b><span>Требуется при первом входе</span></div></div>
+    <h1>Новый пароль</h1>
+    <p class="lead">Задайте свой пароль — старый временный больше не понадобится.</p>
+    <div class="field"><label for="np1">Новый пароль</label>
+      <input type="password" id="np1" placeholder="не короче 6 символов" autocomplete="new-password" /></div>
+    <div class="field"><label for="np2">Повторите пароль</label>
+      <input type="password" id="np2" placeholder="••••••••" autocomplete="new-password" /></div>
+    <button class="btn" id="npBtn">Сохранить пароль</button>
+    <div class="err" id="npErr"></div>
+  </div>
+</div>
+
 <!-- APP -->
 <div class="app" id="appShell" style="display:none">
   <header>
@@ -231,6 +245,9 @@
       </div>
       <div class="head-row"><p class="section-title" style="margin:0">Отметки</p><span class="count" id="journalCount"></span></div>
       <div class="list" id="journalList"></div>
+
+      <div class="head-row" id="failHead" style="display:none; margin-top:18px"><p class="section-title" style="margin:0; color:var(--red)">Неуспешные попытки</p><button class="btn ghost sm" id="failCsvBtn">Скачать CSV</button></div>
+      <div class="list" id="failList"></div>
       <div class="toolbar">
         <button class="btn" id="pdfBtn">Скачать PDF</button>
         <button class="btn secondary" id="csvBtn">Скачать CSV</button>
@@ -243,15 +260,6 @@
         <div id="ciWho" style="font-size:16px;font-weight:650;margin-top:2px">—</div>
         <div id="ciStatus" class="ci-status"></div>
         <div id="ciDevice" class="ci-status" style="font-family:var(--mono);font-size:11px;color:#5b6473"></div>
-      </div>
-      <div class="card" id="bioCard" style="margin-bottom:14px; display:none">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px">
-          <div>
-            <div style="font-size:14px; font-weight:650">Вход по Face ID / отпечатку</div>
-            <div id="bioStatus" class="ci-status" style="margin-top:2px">Не включён на этом устройстве.</div>
-          </div>
-          <button class="btn sm secondary" id="bioBtn" style="white-space:nowrap">Включить</button>
-        </div>
       </div>
       <div class="row" style="margin-bottom:12px">
         <button class="btn" id="scanBtn">Сканировать QR</button>

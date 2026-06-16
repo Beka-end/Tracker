@@ -63,15 +63,36 @@
 
   async function boot() {
     var r = await api('me');
-    if (r.ok && r.data.user) { currentUser = r.data.user; enterApp(); }
+    if (r.ok && r.data.user) { currentUser = r.data.user; afterAuth(); }
     else { showLogin(); }
     setInterval(clock, 1000);
   }
   function showLogin() {
     currentUser = null;
     $('appShell').style.display = 'none';
+    $('changepw').style.display = 'none';
     $('login').style.display = 'flex';
     $('loginIin').focus();
+  }
+  function afterAuth() {
+    if (currentUser && currentUser.mustChange) {
+      $('login').style.display = 'none';
+      $('appShell').style.display = 'none';
+      $('changepw').style.display = 'flex';
+      $('np1').focus();
+    } else { enterApp(); }
+  }
+
+  // ---- геолокация (с разрешения) ----
+  function getGeo() {
+    return new Promise(function (res) {
+      if (!navigator.geolocation) return res(null);
+      navigator.geolocation.getCurrentPosition(
+        function (p) { res({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6), acc: Math.round(p.coords.accuracy) }); },
+        function () { res(null); },
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
+      );
+    });
   }
 
   $('loginBtn').addEventListener('click', doLogin);
@@ -85,12 +106,27 @@
     btn.disabled = true; btn.textContent = 'Вход…';
     try {
       var dev = await gatherDevice();
-      var r = await api('login', { method: 'POST', body: JSON.stringify({ iin: iin, password: pass, uid: deviceUID(), deviceLabel: dev.label }) });
-      if (r.ok && r.data.user) { currentUser = r.data.user; $('loginPass').value = ''; enterApp(); }
+      var geo = await getGeo();
+      var r = await api('login', { method: 'POST', body: JSON.stringify({ iin: iin, password: pass, uid: deviceUID(), deviceLabel: dev.label, geo: geo }) });
+      if (r.ok && r.data.user) { currentUser = r.data.user; $('loginPass').value = ''; afterAuth(); }
       else { $('loginErr').textContent = r.data.error || 'Не удалось войти.'; }
     } catch (e) { $('loginErr').textContent = 'Сбой сети.'; }
     finally { btn.disabled = false; btn.textContent = 'Войти'; }
   }
+
+  $('npBtn').addEventListener('click', async function () {
+    $('npErr').textContent = '';
+    var a = $('np1').value, b = $('np2').value;
+    if (!a || a.length < 6) { $('npErr').textContent = 'Пароль не короче 6 символов.'; return; }
+    if (a !== b) { $('npErr').textContent = 'Пароли не совпадают.'; return; }
+    this.disabled = true; this.textContent = 'Сохранение…';
+    try {
+      var r = await api('change-password', { method: 'POST', body: JSON.stringify({ newPassword: a }) });
+      if (r.ok) { currentUser.mustChange = false; $('np1').value = ''; $('np2').value = ''; $('changepw').style.display = 'none'; enterApp(); }
+      else { $('npErr').textContent = (r.data && r.data.error) || 'Ошибка.'; }
+    } catch (e) { $('npErr').textContent = 'Сбой сети.'; }
+    finally { this.disabled = false; this.textContent = 'Сохранить пароль'; }
+  });
 
   $('logoutBtn').addEventListener('click', async function () {
     stopScanner(); stopStation();
@@ -245,13 +281,11 @@
     if (r.status === 401) { showLogin(); return; }
     var el = $('ciStatus');
     if (r.ok) {
-      if (currentUser) currentUser.bio = !!r.data.bio;
       var rec = r.data.today, shift = r.data.shiftStart;
       if (!rec) { el.className = 'ci-status'; el.textContent = 'Сегодня ещё не отмечались. Сканирование зафиксирует приход (смена с ' + shift + ').'; }
       else if (!rec.out) { el.className = 'ci-status'; el.innerHTML = 'Приход: <b>' + rec.in + '</b>' + (rec.lateMin > 0 ? (' · опоздание ' + rec.lateMin + ' мин') : ' · вовремя') + '. Следующее сканирование — уход.'; }
       else { el.className = 'ci-status done'; el.innerHTML = 'Приход: <b>' + rec.in + '</b> · Уход: <b>' + rec.out + '</b> · отработано ' + fmtDur(workedMin(rec)) + '. День закрыт.'; }
     }
-    updateBioUI();
     gatherDevice().then(function (d) { $('ciDevice').textContent = 'Устройство: ' + d.label; });
   }
 
@@ -329,13 +363,10 @@
   async function onDecoded(text) {
     if (busy) return; busy = true;
     await stopScanner();
-    if (currentUser && currentUser.bio) {
-      setStatus('Подтвердите Face ID / отпечаток…');
-      var ok = await bioAuthenticate();
-      if (!ok) { showResult('err', 'Не подтверждено', '', 'Нужно подтверждение Face ID / отпечатком. Попробуйте ещё раз.'); busy = false; return; }
-    }
+    setStatus('Фиксируем отметку…');
     var dev = await gatherDevice();
-    var r = await api('checkin', { method: 'POST', body: JSON.stringify({ code: text, deviceId: deviceUID(), deviceLabel: dev.label }) });
+    var geo = await getGeo();
+    var r = await api('checkin', { method: 'POST', body: JSON.stringify({ code: text, deviceId: deviceUID(), deviceLabel: dev.label, geo: geo }) });
     if (r.status === 401) { showLogin(); busy = false; return; }
     var d = r.data || {};
     showResult(d.kind || 'err', d.title || 'Ошибка', d.meta || '', d.note || '');
@@ -349,56 +380,6 @@
   }
   function hideResult() { $('result').className = 'result'; }
 
-  /* ---------- Face ID (WebAuthn) ---------- */
-  function bioSupported() { return typeof SimpleWebAuthnBrowser !== 'undefined' && window.PublicKeyCredential; }
-  function updateBioUI() {
-    var card = $('bioCard');
-    if (!bioSupported()) { card.style.display = 'none'; return; }
-    card.style.display = 'block';
-    if (currentUser && currentUser.bio) {
-      $('bioStatus').textContent = 'Включён. При отметке потребуется Face ID / отпечаток.';
-      $('bioStatus').className = 'ci-status done';
-      $('bioBtn').textContent = 'Отключить';
-    } else {
-      $('bioStatus').textContent = 'Не включён. Можно включить на этом устройстве.';
-      $('bioStatus').className = 'ci-status';
-      $('bioBtn').textContent = 'Включить';
-    }
-  }
-  $('bioBtn').addEventListener('click', async function () {
-    var btn = this; btn.disabled = true;
-    try {
-      if (currentUser && currentUser.bio) {
-        if (confirm('Отключить вход по Face ID для вашей учётной записи?')) {
-          var d = await api('webauthn', { method: 'POST', body: JSON.stringify({ action: 'disable' }) });
-          if (d.ok) { currentUser.bio = false; updateBioUI(); }
-        }
-      } else {
-        await bioRegister();
-      }
-    } finally { btn.disabled = false; }
-  });
-  async function bioRegister() {
-    if (!bioSupported()) { alert('Это устройство/браузер не поддерживает Face ID для сайтов.'); return; }
-    var r = await api('webauthn?action=register-options');
-    if (!r.ok || !r.data.options) { alert((r.data && r.data.error) || 'Не удалось начать регистрацию.'); return; }
-    var att;
-    try { att = await SimpleWebAuthnBrowser.startRegistration({ optionsJSON: r.data.options }); }
-    catch (e) { alert('Не удалось включить Face ID: ' + ((e && e.message) || e)); return; }
-    var v = await api('webauthn', { method: 'POST', body: JSON.stringify({ action: 'register-verify', response: att }) });
-    if (v.ok && v.data.verified) { currentUser.bio = true; updateBioUI(); alert('Face ID включён.'); }
-    else alert((v.data && v.data.error) || 'Не удалось подтвердить.');
-  }
-  async function bioAuthenticate() {
-    var r = await api('webauthn?action=auth-options');
-    if (!r.ok || !r.data.options) return false;
-    var asse;
-    try { asse = await SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: r.data.options }); }
-    catch (e) { return false; }
-    var v = await api('webauthn', { method: 'POST', body: JSON.stringify({ action: 'auth-verify', response: asse }) });
-    return !!(v.ok && v.data.verified);
-  }
-
   /* ---------- journal ---------- */
   function defaultPeriod() {
     var now = new Date(), first = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -406,34 +387,59 @@
     if (!$('toDate').value) $('toDate').value = todayStr(now);
   }
   ['fromDate','toDate','search'].forEach(function (id) { $(id).addEventListener('input', renderJournal); });
-  var lastRows = [];
+  function geoStr(g) { return g && g.lat != null ? (g.lat + ', ' + g.lng) : ''; }
+  function geoLink(g) { return g && g.lat != null ? ('<a href="https://maps.google.com/?q=' + g.lat + ',' + g.lng + '" target="_blank" style="color:var(--blue);text-decoration:none">📍 ' + g.lat.toFixed(4) + ',' + g.lng.toFixed(4) + '</a>') : ''; }
+  var lastRows = [], lastFails = [];
   async function renderJournal() {
     var qs = 'from=' + encodeURIComponent($('fromDate').value) + '&to=' + encodeURIComponent($('toDate').value) + '&q=' + encodeURIComponent($('search').value.trim());
     var r = await api('journal?' + qs);
     if (r.status === 401) { showLogin(); return; }
     if (!r.ok) return;
     var rows = r.data.records || []; lastRows = rows;
+    var fails = r.data.fails || []; lastFails = fails;
     $('journalCount').textContent = r.data.total ? (r.data.count + ' / ' + r.data.total) : '';
     var list = $('journalList');
-    if (!rows.length) { list.innerHTML = '<div class="empty"><div class="big">🗂️</div>' + (r.data.total ? 'За выбранный период отметок нет.' : 'Отметок пока нет.') + '</div>'; return; }
-    list.innerHTML = rows.map(function (rr) {
+    if (!rows.length) { list.innerHTML = '<div class="empty"><div class="big">🗂️</div>' + (r.data.total ? 'За выбранный период отметок нет.' : 'Отметок пока нет.') + '</div>'; }
+    else list.innerHTML = rows.map(function (rr) {
       var late = rr.late ? '<span class="badge late">+' + rr.lateMin + 'м</span>' : '';
       var comp = rr.company ? (esc(rr.company) + ' · ') : '';
-      var devLine = (rr.device || rr.ip) ? ('<div class="d2">📱 ' + esc(rr.device || '—') + ' · IP ' + esc(rr.ip || '—') + '</div>') : '';
+      var geo = geoLink(rr.geo);
+      var devLine = (rr.device || rr.ip || geo) ? ('<div class="d2">📱 ' + esc(rr.device || '—') + ' · IP ' + esc(rr.ip || '—') + (geo ? (' · ' + geo) : '') + '</div>') : '';
       return '<div class="rec"><div class="avatar">' + initials(rr.fio) + '</div>' +
         '<div class="info"><div class="n">' + esc(rr.fio) + ' ' + late + '</div><div class="d">' + comp + rr.iin + ' · ' + rr.date + '</div>' + devLine + '</div>' +
         '<div class="jtimes"><div><span>приход</span>' + rr.in + '</div><div><span>уход</span>' + (rr.out||'—') + '</div><div class="jw">' + fmtDur(workedMin(rr)) + '</div></div></div>';
     }).join('');
+    // неуспешные попытки
+    var fl = $('failList');
+    if (fl) {
+      $('failHead').style.display = fails.length ? 'flex' : 'none';
+      fl.innerHTML = fails.map(function (e) {
+        var who = (e.fio ? esc(e.fio) + ' · ' : '') + (e.iin || '—');
+        var geo = geoLink(e.geo);
+        var typ = e.type === 'login' ? 'вход' : 'отметка';
+        return '<div class="rec" style="border-left:3px solid var(--red)"><div class="info">' +
+          '<div class="n" style="color:var(--red)">' + esc(e.reason || 'отказ') + ' <span class="count">(' + typ + ')</span></div>' +
+          '<div class="d">' + who + ' · ' + e.date + ' ' + e.time + '</div>' +
+          '<div class="d2">📱 ' + esc(e.device || '—') + ' · IP ' + esc(e.ip || '—') + (geo ? (' · ' + geo) : '') + '</div></div></div>';
+      }).join('');
+    }
   }
   function periodLabel() { return 'Период: ' + ($('fromDate').value || '…') + ' — ' + ($('toDate').value || '…'); }
   function downloadBlob(blob, name) {
     var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
+  $('failCsvBtn') && $('failCsvBtn').addEventListener('click', function () {
+    var rows = lastFails.slice();
+    var data = [['Тип','Причина','ИИН','ФИО','Дата','Время','Устройство','IP','Геолокация']]
+      .concat(rows.map(function (e) { return [e.type === 'login' ? 'вход' : 'отметка', e.reason || '', e.iin || '', e.fio || '', e.date || '', e.time || '', e.device || '', e.ip || '', geoStr(e.geo)]; }));
+    var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'otkazy-' + $('fromDate').value + '_' + $('toDate').value + '.csv');
+  });
   $('csvBtn').addEventListener('click', function () {
     var rows = lastRows.slice().sort(function (a, b) { return a.ts - b.ts; });
-    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','IP']]
-      .concat(rows.map(function (r, i) { return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.ip||'']; }));
+    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','IP','Геолокация']]
+      .concat(rows.map(function (r, i) { return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.ip||'', geoStr(r.geo)]; }));
     var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'prihod-' + $('fromDate').value + '_' + $('toDate').value + '.csv');
   });
