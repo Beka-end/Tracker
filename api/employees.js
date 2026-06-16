@@ -12,7 +12,7 @@ export default async function handler(req, res) {
           iin: e.iin, fio: e.fio, role: e.role, company: e.company || '',
           deviceLabel: e.deviceLabel || '', bound: !!e.deviceId,
           lastDevice: e.lastDevice || '', lastUid: e.lastUid || '',
-          lastLoginAt: e.lastLoginAt || '',
+          lastLoginAt: e.lastLoginAt || '', hasFace: !!(e.face && e.face.length),
         })),
       });
     }
@@ -21,6 +21,23 @@ export default async function handler(req, res) {
       const body = await readBody(req);
       const action = body.action || 'upsert';
       let emps = (await getEmployees()) || [];
+
+      if (action === 'set-face') {
+        const { iin, descriptor } = body;
+        const e = emps.find((x) => x.iin === iin);
+        if (!e) return res.status(404).json({ error: 'Сотрудник не найден' });
+        if (!Array.isArray(descriptor) || descriptor.length !== 128 || descriptor.some((n) => typeof n !== 'number')) {
+          return res.status(400).json({ error: 'Неверные данные лица' });
+        }
+        e.face = descriptor.map((n) => +n.toFixed(5));
+        await saveEmployees(emps);
+        return res.json({ ok: true });
+      }
+      if (action === 'clear-face') {
+        const e = emps.find((x) => x.iin === body.iin);
+        if (e) { delete e.face; await saveEmployees(emps); }
+        return res.json({ ok: true });
+      }
 
       if (action === 'upsert') {
         const { iin, fio, role, password, company } = body;

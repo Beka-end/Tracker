@@ -194,6 +194,11 @@
     var r = await api('settings', { method: 'POST', body: JSON.stringify({ shiftStart: $('shiftStart').value, tz: $('tzInput').value.trim() }) });
     b.textContent = r.ok ? 'Сохранено ✓' : 'Ошибка'; setTimeout(function(){ b.textContent='Сохранить'; b.disabled=false; }, 1200);
   });
+  $('faceSaveBtn') && $('faceSaveBtn').addEventListener('click', async function () {
+    var r = await api('settings', { method: 'POST', body: JSON.stringify({ faceRequired: $('faceReq').checked, faceThreshold: $('faceThr').value.trim() || 0.5 }) });
+    $('faceCfgMsg').style.color = r.ok ? 'var(--green)' : 'var(--red)';
+    $('faceCfgMsg').textContent = r.ok ? 'Сохранено.' : ((r.data && r.data.error) || 'Ошибка.');
+  });
   $('empSaveBtn').addEventListener('click', saveEmployee);
   $('useHereBtn') && $('useHereBtn').addEventListener('click', async function () {
     var btn = this; btn.disabled = true; btn.textContent = 'Определяем…';
@@ -253,6 +258,8 @@
       $('officeLat').value = sr.data.officeLat != null ? sr.data.officeLat : '';
       $('officeLng').value = sr.data.officeLng != null ? sr.data.officeLng : '';
       $('radiusInput').value = sr.data.radius || 200;
+      $('faceReq').checked = !!sr.data.faceRequired;
+      $('faceThr').value = sr.data.faceThreshold || 0.5;
     }
     var r = await api('employees');
     if (!r.ok) return;
@@ -266,14 +273,17 @@
       var login = e.lastDevice ? (' · вход: ' + esc(e.lastDevice)) : '';
       var comp = e.company ? (esc(e.company) + ' · ') : '';
       var reset = e.bound ? '<button class="iconbtn" data-resetdev="' + e.iin + '" title="Сбросить устройство">⟲</button>' : '';
+      var faceBtn = '<button class="iconbtn" data-face="' + e.iin + '" title="' + (e.hasFace ? 'Лицо загружено — заменить' : 'Загрузить фото лица') + '" style="' + (e.hasFace ? 'color:var(--green)' : '') + '">📷</button>';
+      var faceTag = e.hasFace ? ' · 📷 лицо' : '';
       return '<div class="rec"><div class="avatar">' + initials(e.fio) + '</div>' +
-        '<div class="info"><div class="n">' + esc(e.fio) + ' ' + badge + '</div><div class="d">' + comp + e.iin + '</div><div class="d2">' + dev + login + '</div></div>' +
-        '<div class="acts">' + reset + '<button class="iconbtn" data-edit="' + e.iin + '" title="Изменить">✎</button>' +
+        '<div class="info"><div class="n">' + esc(e.fio) + ' ' + badge + '</div><div class="d">' + comp + e.iin + '</div><div class="d2">' + dev + login + faceTag + '</div></div>' +
+        '<div class="acts">' + faceBtn + reset + '<button class="iconbtn" data-edit="' + e.iin + '" title="Изменить">✎</button>' +
         '<button class="iconbtn danger" data-del="' + e.iin + '" title="Удалить">✕</button></div></div>';
     }).join('');
     list.querySelectorAll('[data-edit]').forEach(function (b) { b.addEventListener('click', function () { startEdit(b.dataset.edit, emps); }); });
     list.querySelectorAll('[data-del]').forEach(function (b) { b.addEventListener('click', function () { delEmployee(b.dataset.del); }); });
     list.querySelectorAll('[data-resetdev]').forEach(function (b) { b.addEventListener('click', function () { resetDevice(b.dataset.resetdev); }); });
+    list.querySelectorAll('[data-face]').forEach(function (b) { b.addEventListener('click', function () { enrollFace(b.dataset.face); }); });
   }
   function startEdit(iin, emps) {
     var e = emps.find(function (x) { return x.iin === iin; }); if (!e) return;
@@ -301,6 +311,7 @@
     if (r.status === 401) { showLogin(); return; }
     var el = $('ciStatus');
     if (r.ok) {
+      if (currentUser) { currentUser.faceRequired = !!r.data.faceRequired; currentUser.hasFace = !!r.data.hasFace; }
       var rec = r.data.today, shift = r.data.shiftStart;
       if (!rec) { el.className = 'ci-status'; el.textContent = 'Сегодня ещё не отмечались. Сканирование зафиксирует приход (смена с ' + shift + ').'; }
       else if (!rec.out) { el.className = 'ci-status'; el.innerHTML = 'Приход: <b>' + rec.in + '</b>' + (rec.lateMin > 0 ? (' · опоздание ' + rec.lateMin + ' мин') : ' · вовремя') + '. Следующее сканирование — уход.'; }
@@ -383,6 +394,16 @@
   async function onDecoded(text) {
     if (busy) return; busy = true;
     await stopScanner();
+    if (currentUser && currentUser.faceRequired && currentUser.hasFace) {
+      setStatus('Проверка лица…');
+      var live = await faceLiveCheck();
+      if (!live) { showResult('err', 'Проверка лица не пройдена', '', 'Нужно моргнуть, глядя в камеру, при хорошем освещении. Попробуйте ещё раз.'); busy = false; return; }
+      var fr = await api('face', { method: 'POST', body: JSON.stringify(live) });
+      if (!(fr.ok && fr.data.ok)) {
+        showResult('err', 'Лицо не подтверждено', (fr.data && fr.data.distance != null ? ('расхождение ' + fr.data.distance) : ''), (fr.data && fr.data.error) || 'Не удалось подтвердить лицо.');
+        busy = false; return;
+      }
+    }
     setStatus('Фиксируем отметку…');
     var dev = await gatherDevice();
     var geo = await getGeo();
@@ -399,6 +420,81 @@
     $('resultWho').textContent = who; $('resultMeta').textContent = meta || ''; $('resultNote').textContent = note || ''; setStatus('');
   }
   function hideResult() { $('result').className = 'result'; }
+
+  /* ---------- Лицо (face-api) ---------- */
+  var FACE = { models: false };
+  async function ensureFace() {
+    if (typeof faceapi === 'undefined') { try { await loadScript('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js'); } catch (e) { return false; } }
+    if (typeof faceapi === 'undefined') return false;
+    if (!FACE.models) {
+      var base = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+      try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri(base);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(base);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(base);
+        FACE.models = true;
+      } catch (e) { return false; }
+    }
+    return true;
+  }
+  function eDist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function earOf(eye) { return (eDist(eye[1], eye[5]) + eDist(eye[2], eye[4])) / (2 * eDist(eye[0], eye[3])); }
+  function avgEAR(lm) { try { return (earOf(lm.getLeftEye()) + earOf(lm.getRightEye())) / 2; } catch (e) { return 1; } }
+
+  // загрузка эталона из фото (админ)
+  var faceTargetIin = null;
+  $('faceFile') && $('faceFile').addEventListener('change', async function () {
+    var file = this.files && this.files[0]; this.value = '';
+    if (!file || !faceTargetIin) return;
+    var iin = faceTargetIin; faceTargetIin = null;
+    var ok = await ensureFace(); if (!ok) { alert('Не удалось загрузить модуль лица (проверьте интернет).'); return; }
+    var img; try { img = await faceapi.bufferToImage(file); } catch (e) { alert('Не удалось открыть фото.'); return; }
+    var opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+    var det;
+    try { det = await faceapi.detectSingleFace(img, opts).withFaceLandmarks().withFaceDescriptor(); } catch (e) { det = null; }
+    if (!det) { alert('Лицо на фото не найдено. Нужен чёткий снимок анфас, при хорошем свете.'); return; }
+    var r = await api('employees', { method: 'POST', body: JSON.stringify({ action: 'set-face', iin: iin, descriptor: Array.from(det.descriptor) }) });
+    if (r.ok) { alert('Фото лица сохранено.'); renderEmployees(); }
+    else alert((r.data && r.data.error) || 'Ошибка сохранения.');
+  });
+  function enrollFace(iin) { faceTargetIin = iin; $('faceFile').click(); }
+
+  // живая проверка с морганием → {descriptor, liveness} | null
+  async function faceLiveCheck() {
+    var ok = await ensureFace();
+    if (!ok) { return null; }
+    return new Promise(function (resolve) {
+      var ov = $('faceOverlay'), v = $('faceVideo'), msg = $('faceMsg');
+      var stream = null, run = true, closedSeen = false, blinked = false, t0 = Date.now();
+      function done(result) { run = false; try { stream && stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} try { v.srcObject = null; } catch (e) {} ov.style.display = 'none'; resolve(result); }
+      $('faceCancel').onclick = function () { done(null); };
+      ov.style.display = 'flex'; msg.textContent = 'Загрузка камеры…';
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false }).then(async function (st) {
+        stream = st; v.srcObject = st; try { await v.play(); } catch (e) {}
+        msg.textContent = 'Моргните, глядя в камеру';
+        var opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 });
+        async function loop() {
+          if (!run) return;
+          if (Date.now() - t0 > 12000) { msg.textContent = 'Не удалось подтвердить. Попробуйте ещё раз.'; setTimeout(function () { done(null); }, 1200); return; }
+          try {
+            var r = await faceapi.detectSingleFace(v, opts).withFaceLandmarks();
+            if (r) {
+              var ear = avgEAR(r.landmarks);
+              if (ear < 0.18) closedSeen = true;
+              if (closedSeen && ear > 0.27) blinked = true;
+              if (blinked) {
+                msg.textContent = 'Готово, секунду…';
+                var full = await faceapi.detectSingleFace(v, opts).withFaceLandmarks().withFaceDescriptor();
+                if (full) { done({ descriptor: Array.from(full.descriptor), liveness: true }); return; }
+              } else { msg.textContent = closedSeen ? 'Откройте глаза' : 'Моргните, глядя в камеру'; }
+            } else { msg.textContent = 'Лицо не видно — смотрите в камеру'; }
+          } catch (e) {}
+          requestAnimationFrame(loop);
+        }
+        loop();
+      }).catch(function () { msg.textContent = 'Камера недоступна.'; setTimeout(function () { done(null); }, 1500); });
+    });
+  }
 
   /* ---------- journal ---------- */
   function defaultPeriod() {
@@ -433,7 +529,7 @@
     return '<a href="' + gi.url + '" target="_blank" style="color:' + color + ';text-decoration:none">📍 ' + esc(gi.text) + '</a>';
   }
   function shortId(id) { return id ? ('#' + String(id).replace(/-/g, '').slice(0, 6)) : ''; }
-  var lastRows = [], lastFails = [];
+  var lastRows = [], lastFails = [], lastEvents = [];
   async function renderJournal() {
     var qs = 'from=' + encodeURIComponent($('fromDate').value) + '&to=' + encodeURIComponent($('toDate').value) + '&q=' + encodeURIComponent($('search').value.trim());
     var r = await api('journal?' + qs);
@@ -441,6 +537,7 @@
     if (!r.ok) return;
     var rows = r.data.records || []; lastRows = rows;
     var fails = r.data.fails || []; lastFails = fails;
+    lastEvents = r.data.events || [];
     if (r.data.office) office = r.data.office;
     $('journalCount').textContent = r.data.total ? (r.data.count + ' / ' + r.data.total) : '';
     var list = $('journalList');
@@ -448,24 +545,27 @@
     else list.innerHTML = rows.map(function (rr) {
       var late = rr.late ? '<span class="badge late">+' + rr.lateMin + 'м</span>' : '';
       var comp = rr.company ? (esc(rr.company) + ' · ') : '';
-      var geo = geoLink(rr.geo);
-      var devLine = (rr.device || rr.ip || geo) ? ('<div class="d2">📱 ' + esc(rr.device || '—') + ' ' + shortId(rr.deviceId) + ' · IP ' + esc(rr.ip || '—') + (geo ? (' · ' + geo) : '') + '</div>') : '';
+      var inLine = '<div class="d2">↓ приход · 📱 ' + esc(rr.device || '—') + ' ' + shortId(rr.deviceId) + ' · IP ' + esc(rr.ip || '—') + (geoLink(rr.geo) ? (' · ' + geoLink(rr.geo)) : '') + '</div>';
+      var outLine = rr.out ? ('<div class="d2">↑ уход · 📱 ' + esc(rr.outDevice || rr.device || '—') + ' ' + shortId(rr.outDeviceId || rr.deviceId) + ' · IP ' + esc(rr.outIp || '—') + (geoLink(rr.outGeo) ? (' · ' + geoLink(rr.outGeo)) : '') + '</div>') : '';
       return '<div class="rec"><div class="avatar">' + initials(rr.fio) + '</div>' +
-        '<div class="info"><div class="n">' + esc(rr.fio) + ' ' + late + '</div><div class="d">' + comp + rr.iin + ' · ' + rr.date + '</div>' + devLine + '</div>' +
+        '<div class="info"><div class="n">' + esc(rr.fio) + ' ' + late + '</div><div class="d">' + comp + rr.iin + ' · ' + rr.date + '</div>' + inLine + outLine + '</div>' +
         '<div class="jtimes"><div><span>приход</span>' + rr.in + '</div><div><span>уход</span>' + (rr.out||'—') + '</div><div class="jw">' + fmtDur(workedMin(rr)) + '</div></div></div>';
     }).join('');
-    // неуспешные попытки
+    // все события: входы и отметки (успешные и нет), с гео и устройством
     var fl = $('failList');
     if (fl) {
-      $('failHead').style.display = fails.length ? 'flex' : 'none';
-      fl.innerHTML = fails.map(function (e) {
+      var evs = r.data.events || [];
+      $('failHead').style.display = evs.length ? 'flex' : 'none';
+      fl.innerHTML = evs.map(function (e) {
         var who = (e.fio ? esc(e.fio) + ' · ' : '') + (e.iin || '—');
         var geo = geoLink(e.geo);
         var typ = e.type === 'login' ? 'вход' : 'отметка';
-        return '<div class="rec" style="border-left:3px solid var(--red)"><div class="info">' +
-          '<div class="n" style="color:var(--red)">' + esc(e.reason || 'отказ') + ' <span class="count">(' + typ + ')</span></div>' +
+        var okColor = e.ok === false ? 'var(--red)' : 'var(--green)';
+        var border = e.ok === false ? 'var(--red)' : 'var(--line)';
+        return '<div class="rec" style="border-left:3px solid ' + border + '"><div class="info">' +
+          '<div class="n" style="color:' + okColor + '">' + esc(e.reason || (e.ok === false ? 'отказ' : 'успех')) + ' <span class="count">(' + typ + ')</span></div>' +
           '<div class="d">' + who + ' · ' + e.date + ' ' + e.time + '</div>' +
-          '<div class="d2">📱 ' + esc(e.device || '—') + ' · IP ' + esc(e.ip || '—') + (geo ? (' · ' + geo) : '') + '</div></div></div>';
+          '<div class="d2">📱 ' + esc(e.device || '—') + ' ' + shortId(e.uid) + ' · IP ' + esc(e.ip || '—') + (geo ? (' · ' + geo) : '') + '</div></div></div>';
       }).join('');
     }
   }
@@ -475,11 +575,11 @@
     document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
   $('failCsvBtn') && $('failCsvBtn').addEventListener('click', function () {
-    var rows = lastFails.slice();
-    var data = [['Тип','Причина','ИИН','ФИО','Дата','Время','Устройство','IP','Геолокация']]
-      .concat(rows.map(function (e) { return [e.type === 'login' ? 'вход' : 'отметка', e.reason || '', e.iin || '', e.fio || '', e.date || '', e.time || '', e.device || '', e.ip || '', geoStr(e.geo)]; }));
+    var rows = lastEvents.slice();
+    var data = [['Тип','Результат','Действие','ИИН','ФИО','Дата','Время','Устройство','ID устройства','IP','Зона','Координаты','Карта']]
+      .concat(rows.map(function (e) { var gi = geoInfo(e.geo); return [e.type === 'login' ? 'вход' : 'отметка', e.ok === false ? 'отказ' : 'успех', e.reason || '', e.iin || '', e.fio || '', e.date || '', e.time || '', e.device || '', e.uid || '', e.ip || '', gi.text || '', geoStr(e.geo), gi.url || '']; }));
     var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
-    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'otkazy-' + fileTag() + '.csv');
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'sobytiya-' + fileTag() + '.csv');
   });
   $('csvBtn').addEventListener('click', function () {
     var rows = lastRows.slice().sort(function (a, b) { return a.ts - b.ts; });

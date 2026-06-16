@@ -7,7 +7,11 @@ export default async function handler(req, res) {
     const s = await getSettings();
 
     if (req.method === 'GET') {
-      return res.json({ shiftStart: s.shiftStart, tz: s.tz, officeLat: s.officeLat ?? null, officeLng: s.officeLng ?? null, radius: s.radius || 200 });
+      return res.json({
+        shiftStart: s.shiftStart, tz: s.tz,
+        officeLat: s.officeLat ?? null, officeLng: s.officeLng ?? null, radius: s.radius || 200,
+        faceRequired: !!s.faceRequired, faceThreshold: s.faceThreshold || 0.5,
+      });
     }
     if (req.method === 'POST') {
       const b = await readBody(req);
@@ -18,8 +22,10 @@ export default async function handler(req, res) {
         s.officeLat = +(+b.officeLat).toFixed(6); s.officeLng = +(+b.officeLng).toFixed(6);
       }
       if (b.radius != null && !isNaN(+b.radius)) s.radius = Math.max(20, Math.min(20000, Math.round(+b.radius)));
+      if (typeof b.faceRequired === 'boolean') s.faceRequired = b.faceRequired;
+      if (b.faceThreshold != null && !isNaN(+b.faceThreshold)) s.faceThreshold = Math.max(0.3, Math.min(0.8, +b.faceThreshold));
       await saveSettings(s);
-      return res.json({ ok: true, shiftStart: s.shiftStart, tz: s.tz, officeLat: s.officeLat ?? null, officeLng: s.officeLng ?? null, radius: s.radius || 200 });
+      return res.json({ ok: true });
     }
     return res.status(405).json({ error: 'method' });
   } catch (e) {
