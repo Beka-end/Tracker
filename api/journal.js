@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       .sort((a, b) => b.ts - a.ts);
     const fails = events.filter((e) => e.ok === false);
 
-    return res.json({ total, count: log.length, records: log, events, fails });
+    return res.json({ total, count: log.length, records: log, events, fails, office: { lat: s.officeLat ?? null, lng: s.officeLng ?? null, radius: s.radius || 200 } });
   } catch (e) {
     return res.status(500).json({ error: String((e && e.message) || e) });
   }

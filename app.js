@@ -195,6 +195,20 @@
     b.textContent = r.ok ? 'Сохранено ✓' : 'Ошибка'; setTimeout(function(){ b.textContent='Сохранить'; b.disabled=false; }, 1200);
   });
   $('empSaveBtn').addEventListener('click', saveEmployee);
+  $('useHereBtn') && $('useHereBtn').addEventListener('click', async function () {
+    var btn = this; btn.disabled = true; btn.textContent = 'Определяем…';
+    var g = await getGeo();
+    btn.disabled = false; btn.textContent = 'Взять текущее место';
+    if (g) { $('officeLat').value = g.lat; $('officeLng').value = g.lng; $('officeMsg').style.color = 'var(--green)'; $('officeMsg').textContent = 'Координаты подставлены — нажмите «Сохранить офис».'; }
+    else { $('officeMsg').style.color = 'var(--red)'; $('officeMsg').textContent = 'Не удалось получить местоположение (разрешите геолокацию).'; }
+  });
+  $('officeSaveBtn') && $('officeSaveBtn').addEventListener('click', async function () {
+    var lat = $('officeLat').value.trim(), lng = $('officeLng').value.trim(), radius = $('radiusInput').value.trim() || 200;
+    var body = (lat === '' && lng === '') ? { officeLat: null, radius: radius } : { officeLat: lat, officeLng: lng, radius: radius };
+    var r = await api('settings', { method: 'POST', body: JSON.stringify(body) });
+    $('officeMsg').style.color = r.ok ? 'var(--green)' : 'var(--red)';
+    $('officeMsg').textContent = r.ok ? 'Офис сохранён.' : ((r.data && r.data.error) || 'Ошибка.');
+  });
   async function saveEmployee() {
     $('empErr').textContent = '';
     var company = $('empCompany').value.trim(), iin = $('empIin').value.trim(), fio = $('empFio').value.trim(), pass = $('empPass').value, role = $('empRole').value;
@@ -233,7 +247,13 @@
   async function renderEmployees() {
     var sr = await api('settings');
     if (sr.status === 401) { showLogin(); return; }
-    if (sr.ok) { $('shiftStart').value = sr.data.shiftStart || '09:00'; $('tzInput').value = sr.data.tz || ''; }
+    if (sr.ok) {
+      $('shiftStart').value = sr.data.shiftStart || '09:00';
+      $('tzInput').value = sr.data.tz || '';
+      $('officeLat').value = sr.data.officeLat != null ? sr.data.officeLat : '';
+      $('officeLng').value = sr.data.officeLng != null ? sr.data.officeLng : '';
+      $('radiusInput').value = sr.data.radius || 200;
+    }
     var r = await api('employees');
     if (!r.ok) return;
     var emps = (r.data.employees || []).slice().sort(function (a, b) { return a.fio.localeCompare(b.fio, 'ru'); });
@@ -388,7 +408,30 @@
   }
   ['fromDate','toDate','search'].forEach(function (id) { $(id).addEventListener('input', renderJournal); });
   function geoStr(g) { return g && g.lat != null ? (g.lat + ', ' + g.lng) : ''; }
-  function geoLink(g) { return g && g.lat != null ? ('<a href="https://maps.google.com/?q=' + g.lat + ',' + g.lng + '" target="_blank" style="color:var(--blue);text-decoration:none">📍 ' + g.lat.toFixed(4) + ',' + g.lng.toFixed(4) + '</a>') : ''; }
+  function mapsUrl(g) { return g && g.lat != null ? ('https://maps.google.com/?q=' + g.lat + ',' + g.lng) : ''; }
+  function haversine(aLat, aLng, bLat, bLng) {
+    var R = 6371000, toR = Math.PI / 180;
+    var dLat = (bLat - aLat) * toR, dLng = (bLng - aLng) * toR;
+    var x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  }
+  function fmtDist(m) { return m < 1000 ? (Math.round(m) + ' м') : ((m / 1000).toFixed(1) + ' км'); }
+  var office = { lat: null, lng: null, radius: 200 };
+  // Возвращает { text, inZone(bool|null), url }
+  function geoInfo(g) {
+    if (!g || g.lat == null) return { text: '', inZone: null, url: '' };
+    var url = mapsUrl(g);
+    if (office.lat == null) return { text: g.lat.toFixed(4) + ',' + g.lng.toFixed(4), inZone: null, url: url };
+    var d = haversine(office.lat, office.lng, g.lat, g.lng);
+    if (d <= (office.radius || 200)) return { text: 'в офисе', inZone: true, url: url };
+    return { text: 'вне зоны · ' + fmtDist(d), inZone: false, url: url };
+  }
+  function geoLink(g) {
+    var gi = geoInfo(g);
+    if (!gi.text) return '';
+    var color = gi.inZone === true ? 'var(--green)' : (gi.inZone === false ? 'var(--red)' : 'var(--blue)');
+    return '<a href="' + gi.url + '" target="_blank" style="color:' + color + ';text-decoration:none">📍 ' + esc(gi.text) + '</a>';
+  }
   var lastRows = [], lastFails = [];
   async function renderJournal() {
     var qs = 'from=' + encodeURIComponent($('fromDate').value) + '&to=' + encodeURIComponent($('toDate').value) + '&q=' + encodeURIComponent($('search').value.trim());
@@ -397,6 +440,7 @@
     if (!r.ok) return;
     var rows = r.data.records || []; lastRows = rows;
     var fails = r.data.fails || []; lastFails = fails;
+    if (r.data.office) office = r.data.office;
     $('journalCount').textContent = r.data.total ? (r.data.count + ' / ' + r.data.total) : '';
     var list = $('journalList');
     if (!rows.length) { list.innerHTML = '<div class="empty"><div class="big">🗂️</div>' + (r.data.total ? 'За выбранный период отметок нет.' : 'Отметок пока нет.') + '</div>'; }
@@ -434,40 +478,51 @@
     var data = [['Тип','Причина','ИИН','ФИО','Дата','Время','Устройство','IP','Геолокация']]
       .concat(rows.map(function (e) { return [e.type === 'login' ? 'вход' : 'отметка', e.reason || '', e.iin || '', e.fio || '', e.date || '', e.time || '', e.device || '', e.ip || '', geoStr(e.geo)]; }));
     var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
-    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'otkazy-' + $('fromDate').value + '_' + $('toDate').value + '.csv');
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'otkazy-' + fileTag() + '.csv');
   });
   $('csvBtn').addEventListener('click', function () {
     var rows = lastRows.slice().sort(function (a, b) { return a.ts - b.ts; });
-    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','IP','Геолокация']]
-      .concat(rows.map(function (r, i) { return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.ip||'', geoStr(r.geo)]; }));
+    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','IP','Зона','Координаты','Карта']]
+      .concat(rows.map(function (r, i) { var gi = geoInfo(r.geo); return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.ip||'', gi.text || '', geoStr(r.geo), gi.url || '']; }));
     var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
-    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'prihod-' + $('fromDate').value + '_' + $('toDate').value + '.csv');
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'prihod-' + fileTag() + '.csv');
   });
+  function geoShort(g) { return g && g.lat != null ? (g.lat.toFixed(4) + ',' + g.lng.toFixed(4)) : '—'; }
+  function fileTag() {
+    var q = $('search').value.trim();
+    var who = q ? ('-' + q.replace(/[^\wа-яёА-ЯЁ0-9]+/gi, '_').slice(0, 30)) : '';
+    return $('fromDate').value + '_' + $('toDate').value + who;
+  }
   $('pdfBtn').addEventListener('click', function () {
     var rows = lastRows.slice().sort(function (a, b) { return a.ts - b.ts; });
     if (!rows.length) { alert('За выбранный период нет отметок.'); return; }
     if (typeof pdfMake === 'undefined') { alert('Модуль PDF не загрузился.'); return; }
     var now = new Date(), lateCount = rows.filter(function (r) { return r.late; }).length;
-    var body = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опозд.','Устройство','IP'].map(function (h) { return { text: h, style: 'th' }; })];
-    rows.forEach(function (r, i) { body.push([
-      { text: String(i+1) }, { text: r.company||'—' }, { text: r.fio }, { text: r.iin }, { text: r.date },
-      { text: r.in||'—' }, { text: r.out||'—' }, { text: fmtDur(workedMin(r)) },
-      { text: r.lateMin ? (r.lateMin + 'м') : '—', color: r.late ? '#c0392b' : '#000' },
-      { text: r.device||'—', fontSize: 7 }, { text: r.ip||'—', fontSize: 7 },
-    ]); });
+    var who = $('search').value.trim();
+    var body = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опозд.','Устройство','IP','Где'].map(function (h) { return { text: h, style: 'th' }; })];
+    rows.forEach(function (r, i) {
+      var gi = geoInfo(r.geo);
+      var geoCell = gi.text ? { text: gi.text, link: gi.url, fontSize: 6, color: gi.inZone === false ? '#c0392b' : (gi.inZone === true ? '#2e7d32' : '#1565c0') } : { text: '—', fontSize: 6 };
+      body.push([
+        { text: String(i+1) }, { text: r.company||'—' }, { text: r.fio }, { text: r.iin }, { text: r.date },
+        { text: r.in||'—' }, { text: r.out||'—' }, { text: fmtDur(workedMin(r)) },
+        { text: r.lateMin ? (r.lateMin + 'м') : '—', color: r.late ? '#c0392b' : '#000' },
+        { text: r.device||'—', fontSize: 6 }, { text: r.ip||'—', fontSize: 6 }, geoCell,
+      ]);
+    });
     var dd = {
-      pageSize: 'A4', pageOrientation: 'landscape', pageMargins: [20, 50, 20, 40],
+      pageSize: 'A4', pageOrientation: 'landscape', pageMargins: [16, 50, 16, 40],
       content: [
         { text: 'Отчёт по приходу сотрудников', fontSize: 15, bold: true, margin: [0,0,0,3] },
-        { text: periodLabel(), fontSize: 10, color: '#666' },
+        { text: periodLabel() + (who ? ('   ·   Сотрудник: ' + who) : ''), fontSize: 10, color: '#666' },
         { text: 'Всего отметок: ' + rows.length + '   ·   Опозданий: ' + lateCount + '   ·   Сформировано: ' + todayStr(now) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()), fontSize: 9, color: '#888', margin: [0,1,0,12] },
-        { table: { headerRows: 1, widths: [14,90,'*',64,46,32,32,36,28,86,62], body: body }, layout: 'lightHorizontalLines' },
+        { table: { headerRows: 1, widths: [12,72,'*',60,42,28,28,32,24,72,52,64], body: body }, layout: 'lightHorizontalLines' },
       ],
-      styles: { th: { bold: true, fillColor: '#f0f0f0', fontSize: 8 } },
-      defaultStyle: { fontSize: 8 },
+      styles: { th: { bold: true, fillColor: '#f0f0f0', fontSize: 7 } },
+      defaultStyle: { fontSize: 7 },
       footer: function (cur, total) { return { text: cur + ' / ' + total, alignment: 'center', fontSize: 8, color: '#999', margin: [0,6,0,0] }; },
     };
-    pdfMake.createPdf(dd).download('prihod-' + $('fromDate').value + '_' + $('toDate').value + '.pdf');
+    pdfMake.createPdf(dd).download('prihod-' + fileTag() + '.pdf');
   });
 
   boot();

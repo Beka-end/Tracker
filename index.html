@@ -208,6 +208,20 @@
           <button class="btn sm" id="shiftSaveBtn" style="height:48px">Сохранить</button>
         </div>
       </div>
+
+      <p class="section-title">Местоположение офиса (для отметки «в офисе / вне зоны»)</p>
+      <div class="card">
+        <div class="grid2">
+          <div class="field"><label for="officeLat">Широта</label><input type="text" id="officeLat" inputmode="decimal" placeholder="43.238949" /></div>
+          <div class="field"><label for="officeLng">Долгота</label><input type="text" id="officeLng" inputmode="decimal" placeholder="76.889709" /></div>
+        </div>
+        <div class="grid2" style="align-items:flex-end">
+          <div class="field" style="margin:0"><label for="radiusInput">Радиус, метров</label><input type="text" id="radiusInput" inputmode="numeric" placeholder="200" /></div>
+          <button class="btn sm secondary" id="useHereBtn" style="height:48px; white-space:nowrap">Взять текущее место</button>
+        </div>
+        <button class="btn" id="officeSaveBtn" style="margin-top:10px">Сохранить офис</button>
+        <div class="err" id="officeMsg" style="color:var(--muted)"></div>
+      </div>
       <p class="section-title">Добавить / изменить сотрудника</p>
       <div class="card">
         <div class="field"><label for="empCompany">Название компании</label><input type="text" id="empCompany" placeholder="ООО «Клиника»" /></div>
