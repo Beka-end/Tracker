@@ -46,19 +46,12 @@ export default async function handler(req, res) {
       return fail('Код устарел', 'Код действует одну минуту — отсканируйте текущий.', 'просроченный код');
     }
 
-    // ----- привязка устройства -----
+    // ----- устройство: только фиксируем, без блокировки -----
     const emps = (await getEmployees()) || [];
     const me = emps.find((e) => e.iin === user.iin);
-    if (me) {
-      if (!me.deviceId) {
-        me.deviceId = deviceId || 'unknown';
-        me.deviceLabel = deviceLabel || 'устройство';
-        await saveEmployees(emps);
-      } else if (deviceId && me.deviceId !== deviceId) {
-        return fail('Чужое устройство',
-          'Отметка возможна только с вашего устройства (' + (me.deviceLabel || 'закреплённого') + '). Для смены телефона обратитесь к администратору.',
-          'чужое устройство');
-      }
+    if (me && (me.deviceId !== deviceId || me.deviceLabel !== (deviceLabel || me.deviceLabel))) {
+      me.deviceId = deviceId; me.deviceLabel = deviceLabel || me.deviceLabel || '';
+      try { await saveEmployees(emps); } catch (e) {}
     }
 
     const log = (await getJSON('attendance', [])) || [];

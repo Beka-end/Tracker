@@ -432,6 +432,7 @@
     var color = gi.inZone === true ? 'var(--green)' : (gi.inZone === false ? 'var(--red)' : 'var(--blue)');
     return '<a href="' + gi.url + '" target="_blank" style="color:' + color + ';text-decoration:none">📍 ' + esc(gi.text) + '</a>';
   }
+  function shortId(id) { return id ? ('#' + String(id).replace(/-/g, '').slice(0, 6)) : ''; }
   var lastRows = [], lastFails = [];
   async function renderJournal() {
     var qs = 'from=' + encodeURIComponent($('fromDate').value) + '&to=' + encodeURIComponent($('toDate').value) + '&q=' + encodeURIComponent($('search').value.trim());
@@ -448,7 +449,7 @@
       var late = rr.late ? '<span class="badge late">+' + rr.lateMin + 'м</span>' : '';
       var comp = rr.company ? (esc(rr.company) + ' · ') : '';
       var geo = geoLink(rr.geo);
-      var devLine = (rr.device || rr.ip || geo) ? ('<div class="d2">📱 ' + esc(rr.device || '—') + ' · IP ' + esc(rr.ip || '—') + (geo ? (' · ' + geo) : '') + '</div>') : '';
+      var devLine = (rr.device || rr.ip || geo) ? ('<div class="d2">📱 ' + esc(rr.device || '—') + ' ' + shortId(rr.deviceId) + ' · IP ' + esc(rr.ip || '—') + (geo ? (' · ' + geo) : '') + '</div>') : '';
       return '<div class="rec"><div class="avatar">' + initials(rr.fio) + '</div>' +
         '<div class="info"><div class="n">' + esc(rr.fio) + ' ' + late + '</div><div class="d">' + comp + rr.iin + ' · ' + rr.date + '</div>' + devLine + '</div>' +
         '<div class="jtimes"><div><span>приход</span>' + rr.in + '</div><div><span>уход</span>' + (rr.out||'—') + '</div><div class="jw">' + fmtDur(workedMin(rr)) + '</div></div></div>';
@@ -482,8 +483,8 @@
   });
   $('csvBtn').addEventListener('click', function () {
     var rows = lastRows.slice().sort(function (a, b) { return a.ts - b.ts; });
-    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','IP','Зона','Координаты','Карта']]
-      .concat(rows.map(function (r, i) { var gi = geoInfo(r.geo); return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.ip||'', gi.text || '', geoStr(r.geo), gi.url || '']; }));
+    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','ID устройства','IP','Зона','Координаты','Карта']]
+      .concat(rows.map(function (r, i) { var gi = geoInfo(r.geo); return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.deviceId||'', r.ip||'', gi.text || '', geoStr(r.geo), gi.url || '']; }));
     var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'prihod-' + fileTag() + '.csv');
   });
@@ -507,7 +508,7 @@
         { text: String(i+1) }, { text: r.company||'—' }, { text: r.fio }, { text: r.iin }, { text: r.date },
         { text: r.in||'—' }, { text: r.out||'—' }, { text: fmtDur(workedMin(r)) },
         { text: r.lateMin ? (r.lateMin + 'м') : '—', color: r.late ? '#c0392b' : '#000' },
-        { text: r.device||'—', fontSize: 6 }, { text: r.ip||'—', fontSize: 6 }, geoCell,
+        { text: (r.device || '—') + (r.deviceId ? (' ' + shortId(r.deviceId)) : ''), fontSize: 6 }, { text: r.ip||'—', fontSize: 6 }, geoCell,
       ]);
     });
     var dd = {
