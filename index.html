@@ -172,15 +172,6 @@
 </div>
 
 <!-- APP -->
-<input type="file" id="faceFile" accept="image/*" style="display:none" />
-<div class="login" id="faceOverlay" style="display:none">
-  <div class="login-card" style="text-align:center">
-    <h1 id="faceTitle">Проверка лица</h1>
-    <p class="lead" id="faceMsg">Смотрите в камеру…</p>
-    <video id="faceVideo" playsinline muted autoplay style="width:100%; border-radius:14px; background:#000; transform:scaleX(-1)"></video>
-    <button class="btn ghost" id="faceCancel" style="margin-top:12px">Отмена</button>
-  </div>
-</div>
 <div class="app" id="appShell" style="display:none">
   <header>
     <div class="who-box"><span class="name" id="hdrName">—</span><span class="role" id="hdrRole"></span></div>
@@ -230,15 +221,6 @@
         </div>
         <button class="btn" id="officeSaveBtn" style="margin-top:10px">Сохранить офис</button>
         <div class="err" id="officeMsg" style="color:var(--muted)"></div>
-      </div>
-      <p class="section-title">Проверка лица при отметке (опционально)</p>
-      <div class="card">
-        <label style="display:flex; align-items:center; gap:10px; font-size:14px; cursor:pointer">
-          <input type="checkbox" id="faceReq" style="width:auto" /> Требовать проверку лица при отметке
-        </label>
-        <div class="field" style="margin:12px 0 0"><label for="faceThr">Строгость совпадения (0.40 строго — 0.60 мягко)</label><input type="text" id="faceThr" inputmode="decimal" placeholder="0.50" /></div>
-        <button class="btn sm secondary" id="faceSaveBtn" style="margin-top:10px">Сохранить</button>
-        <div class="err" id="faceCfgMsg" style="color:var(--muted)">Загрузите фото лиц сотрудникам ниже (кнопка 📷). Проверка работает только у тех, у кого есть фото.</div>
       </div>
 
       <p class="section-title">Добавить / изменить сотрудника</p>

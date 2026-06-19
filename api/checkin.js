@@ -1,6 +1,6 @@
 import {
   currentUser, getSettings, getEmployees, saveEmployees, getJSON, setJSON,
-  localNow, slotCode, clientIP, readBody, logEvent, getOrSetDeviceId, verifySession, getCookie,
+  localNow, slotCode, clientIP, readBody, logEvent, getOrSetDeviceId,
 } from './_lib.js';
 
 function toMin(h) { if (!h) return 0; const p = h.split(':'); return (+p[0]) * 60 + (+p[1]); }
@@ -19,12 +19,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const log = (await getJSON('attendance', [])) || [];
       const rec = log.find((r) => r.iin === user.iin && r.date === now.date);
-      const emps0 = (await getEmployees()) || [];
-      const me0 = emps0.find((e) => e.iin === user.iin);
-      return res.json({
-        shiftStart: s.shiftStart, today: rec || null, worked: rec ? workedMin(rec) : null,
-        faceRequired: !!s.faceRequired, hasFace: !!(me0 && me0.face && me0.face.length),
-      });
+      return res.json({ shiftStart: s.shiftStart, today: rec || null, worked: rec ? workedMin(rec) : null });
     }
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
@@ -54,14 +49,6 @@ export default async function handler(req, res) {
     // ----- устройство: только фиксируем, без блокировки -----
     const emps = (await getEmployees()) || [];
     const me = emps.find((e) => e.iin === user.iin);
-
-    // ----- проверка лица (если включена и есть эталон) -----
-    if (s.faceRequired && me && me.face && me.face.length) {
-      const fp = verifySession(getCookie(req, 'facepass'));
-      if (!fp || fp.iin !== user.iin || (Date.now() - (fp.t || 0)) > 2 * 60 * 1000) {
-        return fail('Нужна проверка лица', 'Подтвердите лицо и повторите.', 'нет проверки лица');
-      }
-    }
 
     if (me && (me.deviceId !== deviceId || me.deviceLabel !== (deviceLabel || me.deviceLabel))) {
       me.deviceId = deviceId; me.deviceLabel = deviceLabel || me.deviceLabel || '';
