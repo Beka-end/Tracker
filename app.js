@@ -209,6 +209,61 @@
     $('officeMsg').style.color = r.ok ? 'var(--green)' : 'var(--red)';
     $('officeMsg').textContent = r.ok ? 'Офис сохранён.' : ((r.data && r.data.error) || 'Ошибка.');
   });
+
+  // ----- клиники -----
+  var clinics = [];
+  function renderClinics() {
+    var box = $('clinicList'); if (!box) return;
+    if (!clinics.length) { box.innerHTML = '<div class="ci-status" style="padding:4px 0">Клиник пока нет. Добавьте ниже.</div>'; return; }
+    box.innerHTML = clinics.map(function (c) {
+      var link = '<a href="https://maps.google.com/?q=' + c.lat + ',' + c.lng + '" target="_blank" style="color:var(--blue);text-decoration:none">📍 на карте</a>';
+      return '<div class="rec"><div class="info"><div class="n">' + esc(c.name) + '</div>' +
+        '<div class="d">' + (c.address ? esc(c.address) + ' · ' : '') + 'радиус ' + c.radius + ' м · ' + link + '</div></div>' +
+        '<div class="acts"><button class="iconbtn danger" data-delclinic="' + c.id + '" title="Удалить">✕</button></div></div>';
+    }).join('');
+    box.querySelectorAll('[data-delclinic]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        clinics = clinics.filter(function (x) { return x.id !== b.dataset.delclinic; });
+        await saveClinics(); renderClinics();
+      });
+    });
+  }
+  async function saveClinics() {
+    var r = await api('settings', { method: 'POST', body: JSON.stringify({ clinics: clinics }) });
+    if (!r.ok) { $('clMsg').style.color = 'var(--red)'; $('clMsg').textContent = (r.data && r.data.error) || 'Ошибка сохранения.'; return false; }
+    return true;
+  }
+  $('clHereBtn') && $('clHereBtn').addEventListener('click', async function () {
+    var b = this; b.disabled = true; b.textContent = 'Определяем…';
+    var g = await getGeo(); b.disabled = false; b.textContent = 'Взять текущее место';
+    if (g) { $('clLat').value = g.lat; $('clLng').value = g.lng; $('clMsg').style.color = 'var(--green)'; $('clMsg').textContent = 'Координаты подставлены.'; }
+    else { $('clMsg').style.color = 'var(--red)'; $('clMsg').textContent = 'Не удалось получить местоположение.'; }
+  });
+  $('clGeocodeBtn') && $('clGeocodeBtn').addEventListener('click', async function () {
+    var addr = $('clAddr').value.trim();
+    if (!addr) { $('clMsg').style.color = 'var(--red)'; $('clMsg').textContent = 'Введите адрес.'; return; }
+    var b = this; b.disabled = true; b.textContent = 'Поиск…';
+    try {
+      var resp = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(addr), { headers: { 'Accept': 'application/json' } });
+      var arr = await resp.json();
+      if (arr && arr.length) {
+        $('clLat').value = (+arr[0].lat).toFixed(6); $('clLng').value = (+arr[0].lon).toFixed(6);
+        $('clMsg').style.color = 'var(--muted)'; $('clMsg').textContent = 'Координаты найдены (приблизительно) — проверьте по ссылке после добавления.';
+      } else { $('clMsg').style.color = 'var(--red)'; $('clMsg').textContent = 'Адрес не найден. Введите координаты вручную или встаньте на месте и нажмите «Взять текущее место».'; }
+    } catch (e) { $('clMsg').style.color = 'var(--red)'; $('clMsg').textContent = 'Поиск недоступен. Введите координаты вручную.'; }
+    finally { b.disabled = false; b.textContent = 'Найти по адресу'; }
+  });
+  $('clAddBtn') && $('clAddBtn').addEventListener('click', async function () {
+    var name = $('clName').value.trim(), addr = $('clAddr').value.trim(), lat = $('clLat').value.trim(), lng = $('clLng').value.trim(), radius = $('clRadius').value.trim() || 150;
+    if (!name) { $('clMsg').style.color = 'var(--red)'; $('clMsg').textContent = 'Укажите название клиники.'; return; }
+    if (isNaN(+lat) || isNaN(+lng) || lat === '' || lng === '') { $('clMsg').style.color = 'var(--red)'; $('clMsg').textContent = 'Нужны координаты: «Найти по адресу» или «Взять текущее место».'; return; }
+    clinics.push({ id: 'c' + Date.now(), name: name, address: addr, lat: +(+lat).toFixed(6), lng: +(+lng).toFixed(6), radius: Math.round(+radius) });
+    if (await saveClinics()) {
+      $('clName').value = ''; $('clAddr').value = ''; $('clLat').value = ''; $('clLng').value = ''; $('clRadius').value = '';
+      $('clMsg').style.color = 'var(--green)'; $('clMsg').textContent = 'Клиника добавлена.';
+      renderClinics();
+    }
+  });
   async function saveEmployee() {
     $('empErr').textContent = '';
     var company = $('empCompany').value.trim(), iin = $('empIin').value.trim(), fio = $('empFio').value.trim(), pass = $('empPass').value, role = $('empRole').value;
@@ -253,6 +308,8 @@
       $('officeLat').value = sr.data.officeLat != null ? sr.data.officeLat : '';
       $('officeLng').value = sr.data.officeLng != null ? sr.data.officeLng : '';
       $('radiusInput').value = sr.data.radius || 200;
+      clinics = sr.data.clinics || [];
+      renderClinics();
     }
     var r = await api('employees');
     if (!r.ok) return;
@@ -443,14 +500,15 @@
     var fails = r.data.fails || []; lastFails = fails;
     lastEvents = r.data.events || [];
     if (r.data.office) office = r.data.office;
+    if (r.data.clinics) clinics = r.data.clinics;
     $('journalCount').textContent = r.data.total ? (r.data.count + ' / ' + r.data.total) : '';
     var list = $('journalList');
     if (!rows.length) { list.innerHTML = '<div class="empty"><div class="big">🗂️</div>' + (r.data.total ? 'За выбранный период отметок нет.' : 'Отметок пока нет.') + '</div>'; }
     else list.innerHTML = rows.map(function (rr) {
       var late = rr.late ? '<span class="badge late">+' + rr.lateMin + 'м</span>' : '';
       var comp = rr.company ? (esc(rr.company) + ' · ') : '';
-      var inLine = '<div class="d2">↓ приход · 📱 ' + esc(rr.device || '—') + ' ' + shortId(rr.deviceId) + ' · IP ' + esc(rr.ip || '—') + (geoLink(rr.geo) ? (' · ' + geoLink(rr.geo)) : '') + '</div>';
-      var outLine = rr.out ? ('<div class="d2">↑ уход · 📱 ' + esc(rr.outDevice || rr.device || '—') + ' ' + shortId(rr.outDeviceId || rr.deviceId) + ' · IP ' + esc(rr.outIp || '—') + (geoLink(rr.outGeo) ? (' · ' + geoLink(rr.outGeo)) : '') + '</div>') : '';
+      var inLine = '<div class="d2">↓ приход · ' + (rr.clinic ? '🏥 ' + esc(rr.clinic) + ' · ' : '') + '📱 ' + esc(rr.device || '—') + ' ' + shortId(rr.deviceId) + ' · IP ' + esc(rr.ip || '—') + (geoLink(rr.geo) ? (' · ' + geoLink(rr.geo)) : '') + '</div>';
+      var outLine = rr.out ? ('<div class="d2">↑ уход · ' + (rr.outClinic ? '🏥 ' + esc(rr.outClinic) + ' · ' : '') + '📱 ' + esc(rr.outDevice || rr.device || '—') + ' ' + shortId(rr.outDeviceId || rr.deviceId) + ' · IP ' + esc(rr.outIp || '—') + (geoLink(rr.outGeo) ? (' · ' + geoLink(rr.outGeo)) : '') + '</div>') : '';
       return '<div class="rec"><div class="avatar">' + initials(rr.fio) + '</div>' +
         '<div class="info"><div class="n">' + esc(rr.fio) + ' ' + late + '</div><div class="d">' + comp + rr.iin + ' · ' + rr.date + '</div>' + inLine + outLine + '</div>' +
         '<div class="jtimes"><div><span>приход</span>' + rr.in + '</div><div><span>уход</span>' + (rr.out||'—') + '</div><div class="jw">' + fmtDur(workedMin(rr)) + '</div></div></div>';
@@ -487,8 +545,8 @@
   });
   $('csvBtn').addEventListener('click', function () {
     var rows = lastRows.slice().sort(function (a, b) { return a.ts - b.ts; });
-    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опоздание, мин','Устройство','ID устройства','IP','Зона','Координаты','Карта']]
-      .concat(rows.map(function (r, i) { var gi = geoInfo(r.geo); return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.out||'', fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.deviceId||'', r.ip||'', gi.text || '', geoStr(r.geo), gi.url || '']; }));
+    var data = [['№','Компания','ФИО','ИИН','Дата','Приход','Клиника (приход)','Зона (приход)','Координаты (приход)','Уход','Клиника (уход)','Зона (уход)','Координаты (уход)','Часы','Опоздание, мин','Устройство','ID устройства','IP']]
+      .concat(rows.map(function (r, i) { var gi = geoInfo(r.geo), go = geoInfo(r.outGeo); return [i+1, r.company||'', r.fio, r.iin, r.date, r.in, r.clinic||'', gi.text||'', geoStr(r.geo), r.out||'', r.outClinic||'', go.text||'', geoStr(r.outGeo), fmtDur(workedMin(r)), r.lateMin||0, r.device||'', r.deviceId||'', r.ip||'']; }));
     var csv = data.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\r\n');
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), 'prihod-' + fileTag() + '.csv');
   });
@@ -506,13 +564,21 @@
     var who = $('search').value.trim();
     var body = [['№','Компания','ФИО','ИИН','Дата','Приход','Уход','Часы','Опозд.','Устройство','IP','Где'].map(function (h) { return { text: h, style: 'th' }; })];
     rows.forEach(function (r, i) {
-      var gi = geoInfo(r.geo);
-      var geoCell = gi.text ? { text: gi.text, link: gi.url, fontSize: 6, color: gi.inZone === false ? '#c0392b' : (gi.inZone === true ? '#2e7d32' : '#1565c0') } : { text: '—', fontSize: 6 };
+      var gi = geoInfo(r.geo), go = geoInfo(r.outGeo);
+      function cell(clinic, info) {
+        if (!clinic && !info.text) return { text: '—', fontSize: 6 };
+        var label = (clinic ? clinic + (info.text ? ' · ' : '') : '') + (info.text || '');
+        return { text: label, link: info.url || undefined, fontSize: 6, color: info.inZone === false ? '#c0392b' : (info.inZone === true ? '#2e7d32' : '#1565c0') };
+      }
+      var whereCell = { stack: [
+        { text: 'приход:', fontSize: 5, color: '#888' }, cell(r.clinic, gi),
+        { text: 'уход:', fontSize: 5, color: '#888', margin: [0, 2, 0, 0] }, cell(r.outClinic, go),
+      ] };
       body.push([
         { text: String(i+1) }, { text: r.company||'—' }, { text: r.fio }, { text: r.iin }, { text: r.date },
         { text: r.in||'—' }, { text: r.out||'—' }, { text: fmtDur(workedMin(r)) },
         { text: r.lateMin ? (r.lateMin + 'м') : '—', color: r.late ? '#c0392b' : '#000' },
-        { text: (r.device || '—') + (r.deviceId ? (' ' + shortId(r.deviceId)) : ''), fontSize: 6 }, { text: r.ip||'—', fontSize: 6 }, geoCell,
+        { text: (r.device || '—') + (r.deviceId ? (' ' + shortId(r.deviceId)) : ''), fontSize: 6 }, { text: r.ip||'—', fontSize: 6 }, whereCell,
       ]);
     });
     var dd = {

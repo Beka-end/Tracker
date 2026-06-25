@@ -5,6 +5,21 @@ import {
 
 function toMin(h) { if (!h) return 0; const p = h.split(':'); return (+p[0]) * 60 + (+p[1]); }
 function workedMin(r) { if (!r.in || !r.out) return null; let d = toMin(r.out) - toMin(r.in); if (d < 0) d += 1440; return d; }
+function haversine(aLat, aLng, bLat, bLng) {
+  const R = 6371000, toR = Math.PI / 180;
+  const dLat = (bLat - aLat) * toR, dLng = (bLng - aLng) * toR;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+function clinicOf(geo, clinics) {
+  if (!geo || geo.lat == null || !Array.isArray(clinics) || !clinics.length) return '';
+  let best = null, bd = Infinity;
+  for (const c of clinics) {
+    const d = haversine(geo.lat, geo.lng, c.lat, c.lng);
+    if (d <= (c.radius || 150) && d < bd) { bd = d; best = c; }
+  }
+  return best ? best.name : '';
+}
 
 export default async function handler(req, res) {
   try {
@@ -65,7 +80,7 @@ export default async function handler(req, res) {
         iin: user.iin, fio: user.fio, company: (me && me.company) || user.company || '', date: now.date,
         in: now.time, out: null, shiftStart: s.shiftStart,
         late: lateMin > 0, lateMin,
-        device: deviceLabel || '', deviceId: deviceId || '', ip, geo: geo || null, ts: now.ts, outTs: null,
+        device: deviceLabel || '', deviceId: deviceId || '', ip, geo: geo || null, clinic: clinicOf(geo, s.clinics), ts: now.ts, outTs: null,
       };
       log.push(rec);
       await setJSON('attendance', log);
@@ -76,7 +91,7 @@ export default async function handler(req, res) {
         note: lateMin > 0 ? ('Опоздание ' + lateMin + ' мин (смена с ' + s.shiftStart + ').') : 'Вовремя. Хорошего дня!',
       });
     } else {
-      rec.out = now.time; rec.outTs = now.ts; rec.outIp = ip; rec.outGeo = geo || null; rec.outDevice = deviceLabel || ''; rec.outDeviceId = deviceId || '';
+      rec.out = now.time; rec.outTs = now.ts; rec.outIp = ip; rec.outGeo = geo || null; rec.outDevice = deviceLabel || ''; rec.outDeviceId = deviceId || ''; rec.outClinic = clinicOf(geo, s.clinics);
       await setJSON('attendance', log);
       await logEvent({ type: 'checkin', ok: true, iin: user.iin, fio: user.fio, reason: 'уход', ip, device: deviceLabel || '', uid: deviceId || '', geo: geo || null });
       return res.json({

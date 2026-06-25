@@ -223,6 +223,28 @@
         <div class="err" id="officeMsg" style="color:var(--muted)"></div>
       </div>
 
+      <p class="section-title">Клиники (где сотрудники отмечаются)</p>
+      <div class="card">
+        <div class="list" id="clinicList" style="margin-bottom:12px"></div>
+        <div class="field"><label for="clName">Название клиники</label><input type="text" id="clName" placeholder="Клиника №1" /></div>
+        <div class="field"><label for="clAddr">Адрес</label>
+          <div style="display:flex; gap:8px">
+            <input type="text" id="clAddr" placeholder="г. Алматы, ул. ..." style="flex:1" />
+            <button class="btn sm secondary" id="clGeocodeBtn" style="white-space:nowrap">Найти по адресу</button>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label for="clLat">Широта</label><input type="text" id="clLat" inputmode="decimal" placeholder="43.238949" /></div>
+          <div class="field"><label for="clLng">Долгота</label><input type="text" id="clLng" inputmode="decimal" placeholder="76.889709" /></div>
+        </div>
+        <div class="grid2" style="align-items:flex-end">
+          <div class="field" style="margin:0"><label for="clRadius">Радиус, метров</label><input type="text" id="clRadius" inputmode="numeric" placeholder="150" /></div>
+          <button class="btn sm secondary" id="clHereBtn" style="height:48px; white-space:nowrap">Взять текущее место</button>
+        </div>
+        <button class="btn" id="clAddBtn" style="margin-top:10px">Добавить клинику</button>
+        <div class="err" id="clMsg" style="color:var(--muted)"></div>
+      </div>
+
       <p class="section-title">Добавить / изменить сотрудника</p>
       <div class="card">
         <div class="field"><label for="empCompany">Название компании</label><input type="text" id="empCompany" placeholder="ООО «Клиника»" /></div>

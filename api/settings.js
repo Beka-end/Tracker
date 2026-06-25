@@ -10,6 +10,7 @@ export default async function handler(req, res) {
       return res.json({
         shiftStart: s.shiftStart, tz: s.tz,
         officeLat: s.officeLat ?? null, officeLng: s.officeLng ?? null, radius: s.radius || 200,
+        clinics: s.clinics || [],
       });
     }
     if (req.method === 'POST') {
@@ -21,6 +22,18 @@ export default async function handler(req, res) {
         s.officeLat = +(+b.officeLat).toFixed(6); s.officeLng = +(+b.officeLng).toFixed(6);
       }
       if (b.radius != null && !isNaN(+b.radius)) s.radius = Math.max(20, Math.min(20000, Math.round(+b.radius)));
+      if (Array.isArray(b.clinics)) {
+        s.clinics = b.clinics
+          .filter((c) => c && c.name && !isNaN(+c.lat) && !isNaN(+c.lng))
+          .slice(0, 200)
+          .map((c, i) => ({
+            id: c.id || ('c' + Date.now() + i),
+            name: String(c.name).slice(0, 80),
+            address: String(c.address || '').slice(0, 160),
+            lat: +(+c.lat).toFixed(6), lng: +(+c.lng).toFixed(6),
+            radius: Math.max(20, Math.min(20000, Math.round(+c.radius || 150))),
+          }));
+      }
       await saveSettings(s);
       return res.json({ ok: true });
     }
